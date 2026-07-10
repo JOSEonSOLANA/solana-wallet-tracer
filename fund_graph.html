@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Flujo de Fondos - Solana</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #08081a;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* === LAYOUT === */
+        #app { display: flex; flex: 1; min-height: 0; }
+        #sidebar {
+            width: 280px;
+            min-width: 280px;
+            background: linear-gradient(180deg, #0c0c24, #08081a);
+            border-right: 1px solid #1a1a3e;
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+            gap: 12px;
+            overflow-y: auto;
+        }
+        #main-area { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        #graph-container { flex: 1; position: relative; min-height: 0; overflow: auto; }
+        #graph-container svg { width: 100%; height: 100%; display: block; }
+        #bottom-section {
+            flex: 1;
+            min-height: 200px;
+            background: #0c0c24;
+            border-top: 2px solid #1a1a3e;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #bottom-section .bs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: rgba(233,69,96,0.06);
+            border-bottom: 1px solid #1a1a3e;
+            flex-shrink: 0;
+        }
+        #bottom-section .bs-header h3 {
+            font-size: 13px;
+            color: #e94560;
+            letter-spacing: 0.8px;
+            font-weight: 700;
+        }
+        #bottom-section .bs-header span {
+            font-size: 10px;
+            color: #666;
+            background: rgba(255,255,255,0.04);
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+        #tx-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+        /* === NARRATIVE STEPS === */
+        .narrative-step {
+            padding: 14px 16px 14px 20px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border-left: 4px solid #2a2a4e;
+            border-bottom: 1px solid #0d0d22;
+        }
+        .narrative-step:last-child { border-bottom: none; }
+        .narrative-step:hover { background: rgba(255,255,255,0.02); }
+        .narrative-step.active { background: rgba(233,69,96,0.08); }
+        .narrative-step[data-badge="drain"] { border-left-color: #e94560; }
+        .narrative-step[data-badge="receive"] { border-left-color: #ffd93d; }
+        .narrative-step[data-badge="swap"] { border-left-color: #4ade80; }
+        .narrative-step[data-badge="final"] { border-left-color: #a78bfa; }
+        .narrative-step[data-badge="move"] { border-left-color: #6495ed; }
+        .narrative-step[data-badge="vulnerability"] { border-left-color: #ff6b6b; }
+        .narrative-step[data-badge="consolidate"] { border-left-color: #666; }
+        /* Section divider between different badge types */
+        .narrative-step.section-divider {
+            border-top: 2px solid #1a1a3e;
+        }
+
+
+        
+        .day-header {
+            padding: 10px 16px 6px 20px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #1a1a3e;
+            background: #0d0d22;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .ns-time-label {
+            font-size: 10px;
+            color: #666;
+            flex-shrink: 0;
+            font-family: monospace;
+        }
+        .ns-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .ns-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+            flex-shrink: 0;
+            letter-spacing: 0.3px;
+        }
+        .ns-badge.drain { background: rgba(233,69,96,0.25); color: #ff6b6b; }
+        .ns-badge.receive { background: rgba(255,215,0,0.15); color: #ffd93d; }
+        .ns-badge.swap { background: rgba(74,222,128,0.15); color: #4ade80; }
+        .ns-badge.final { background: rgba(167,139,250,0.25); color: #a78bfa; }
+        .ns-badge.move { background: rgba(100,149,237,0.15); color: #6495ed; }
+        .ns-badge.vulnerability { background: rgba(233,69,96,0.25); color: #ff6b6b; }
+        .ns-badge.consolidate { background: rgba(255,255,255,0.1); color: #aaa; }
+        
+        .ns-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #eee;
+        }
+        .ns-desc {
+            font-size: 10px;
+            color: #777;
+            margin-left: 10px;
+            line-height: 1.4;
+        }
+        .ns-detail {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 6px;
+            margin-left: 10px;
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 6px;
+            font-size: 11px;
+        }
+        .ns-detail .ns-arrow {
+            color: #e94560;
+            font-weight: bold;
+        }
+        .ns-detail .ns-wallet {
+            font-family: monospace;
+            font-size: 10px;
+            color: #999;
+        }
+        .ns-detail .ns-amt {
+            color: #4ade80;
+            font-weight: 600;
+        }
+        .ns-detail .ns-unit {
+            color: #666;
+            font-size: 9px;
+        }
+        .ns-detail .ns-time {
+            color: #555;
+            font-size: 9px;
+            margin-left: auto;
+        }
+        .ns-detail.ns-highlight {
+            background: rgba(233,69,96,0.15);
+            border-left: 2px solid #e94560;
+        }
+        /* Sub-transactions within a step */
+        .ns-sublist {
+            margin-top: 4px;
+            margin-left: 10px;
+        }
+        .ns-subtx {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 8px;
+            font-size: 10px;
+            color: #666;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .ns-subtx:hover {
+            background: rgba(255,255,255,0.04);
+            color: #aaa;
+        }
+        .ns-subtx.active {
+            background: rgba(233,69,96,0.1);
+            color: #ccc;
+        }
+        .ns-subtx .s-arrow { color: #555; font-size: 8px; width: 12px; flex-shrink: 0; }
+        .ns-subtx .s-wallet {
+            font-family: monospace;
+            font-size: 9px;
+            color: #666;
+            flex-shrink: 0;
+        }
+        .ns-subtx .s-amt { color: #888; font-weight: 600; flex-shrink: 0; }
+        .ns-subtx .s-unit { color: #555; font-size: 8px; flex-shrink: 0; }
+        .ns-subtx .s-time { color: #444; font-size: 8px; margin-left: auto; }
+        #tx-list::-webkit-scrollbar { width: 4px; }
+        #tx-list::-webkit-scrollbar-track { background: transparent; }
+        #tx-list::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+        /* === SIDEBAR === */
+        #sidebar h1 {
+            font-size: 15px;
+            color: #e94560;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1a1a3e;
+        }
+        #sidebar .stat-group {
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 11px;
+        }
+        #sidebar .stat-group .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 2px 0;
+        }
+        #sidebar .stat-group .stat-row .label { color: #888; }
+        #sidebar .stat-group .stat-row .value { color: #fff; font-weight: 600; }
+        #sidebar .stat-group .stat-row .value.highlight { color: #e94560; }
+
+        #sidebar .section-title {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+
+        #sidebar .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 11px;
+            color: #ccc;
+        }
+        #sidebar .legend-item .dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        #sidebar .legend-item .line {
+            width: 20px; height: 3px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        #sidebar button {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+            width: 100%;
+            font-weight: 600;
+        }
+        #sidebar button:hover { background: #ff6b6b; }
+        #sidebar button.sec {
+            background: transparent;
+            border: 1px solid #333;
+            font-weight: 400;
+        }
+        #sidebar button.sec:hover { background: rgba(255,255,255,0.05); }
+        #sidebar .btn-group { display: flex; gap: 6px; }
+        #sidebar .btn-group button { flex: 1; }
+        #sidebar input:focus { border-color: #e94560; outline: none; }
+        #history-list .hist-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 9px;
+            transition: all 0.15s;
+        }
+        #history-list .hist-item:hover { background: rgba(255,255,255,0.05); }
+        #history-list .hist-item .hist-addr { font-family: monospace; color: #888; flex: 1; }
+        #history-list .hist-item .hist-status { font-size: 8px; padding: 1px 5px; border-radius: 3px; }
+        #history-list .hist-item .hist-status.done { background: rgba(74,222,128,0.15); color: #4ade80; }
+        #history-list .hist-item .hist-status.proc { background: rgba(255,215,0,0.15); color: #ffd93d; }
+        #history-list .hist-item .hist-status.fail { background: rgba(233,69,96,0.15); color: #e94560; }
+        #history-list .hist-item .hist-del { color: #444; cursor: pointer; padding: 0 2px; }
+        #history-list .hist-item .hist-del:hover { color: #e94560; }
+        #search-status .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid #333; border-top-color: #e94560; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 4px; vertical-align: middle; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* === BOTTOM PANEL === */
+        #bottom-panel .bp-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        #bottom-panel .bp-header h3 { font-size: 13px; color: #e94560; }
+        #bottom-panel .bp-header .bp-close {
+            cursor: pointer;
+            color: #666;
+            font-size: 18px;
+            line-height: 1;
+        }
+        #bottom-panel .bp-header .bp-close:hover { color: #fff; }
+        #bottom-panel .bp-content { font-size: 11px; color: #ccc; line-height: 1.6; }
+        #bottom-panel .bp-content .mono { font-family: monospace; font-size: 10px; color: #888; }
+        #bottom-panel .bp-content .tx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 4px; }
+        #bottom-panel .bp-content .tx-item {
+            background: rgba(255,255,255,0.03);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+        #bottom-panel .bp-content .tx-item .dir { color: #e94560; }
+        #bottom-panel .bp-content .tx-item .amt { color: #4ade80; font-weight: 600; }
+
+        /* === GRAPH === */
+        .edge-path {
+            fill: none;
+            stroke-linecap: round;
+        }
+        .edge-label {
+            font-size: 9px;
+            fill: #aaa;
+            pointer-events: none;
+            text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.9);
+        }
+        .node-circle {
+            cursor: pointer;
+            transition: stroke-width 0.2s;
+        }
+        .node-circle:hover { filter: brightness(1.3); }
+        .node-label {
+            pointer-events: none;
+            text-shadow: 0 0 8px rgba(0,0,0,0.95);
+        }
+        .flow-particle {
+            opacity: 0.6;
+        }
+        .edge-path.active {
+            stroke-width: 3px !important;
+            stroke-opacity: 1 !important;
+            filter: brightness(1.3);
+            stroke-dasharray: 5 6 !important;
+            animation: flowDash 0.5s linear infinite !important;
+        }
+        .edge-path.faded {
+            stroke-opacity: 0.04 !important;
+        }
+        @keyframes flowDash {
+            to { stroke-dashoffset: -11; }
+        }
+        .node-circle.faded {
+            opacity: 0.12 !important;
+        }
+
+        /* === TOOLTIP === */
+        #float-tip {
+            position: fixed;
+            z-index: 1000;
+            background: rgba(0,0,0,0.92);
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 11px;
+            pointer-events: none;
+            max-width: 320px;
+            border: 1px solid #2a2a4e;
+            display: none;
+            line-height: 1.5;
+            backdrop-filter: blur(10px);
+        }
+        #float-tip .tip-title { font-weight: 700; font-size: 12px; color: #fff; }
+        #float-tip .tip-addr { font-family: monospace; font-size: 9px; color: #666; word-break: break-all; }
+        #float-tip .tip-green { color: #4ade80; }
+        #float-tip .tip-red { color: #e94560; }
+
+        @media (max-width: 800px) {
+            #sidebar { width: 200px; min-width: 200px; }
+            #sidebar h1 { font-size: 12px; }
+            #bottom-panel { height: 120px; min-height: 120px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- SIDEBAR -->
+    <div id="sidebar">
+        <h1>Flujo de Fondos</h1>
+
+        <div class="section-title">Buscar wallet</div>
+        <div style="display:flex;gap:4px;">
+            <input type="text" id="search-input" placeholder="Dirección Solana..." style="flex:1;background:#1a1a3e;border:1px solid #333;color:#fff;padding:6px 8px;border-radius:4px;font-size:11px;font-family:monospace;">
+            <button onclick="searchWallet()" style="background:#e94560;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">Buscar</button>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+            <select id="hops-select" style="flex:1;background:#1a1a3e;border:1px solid #333;color:#aaa;padding:4px 6px;border-radius:4px;font-size:10px;">
+                <option value="0">Solo esta tx</option>
+                <option value="1">1 nivel</option>
+                <option value="2" selected>2 niveles</option>
+                <option value="3">3 niveles</option>
+            </select>
+            <button onclick="loadFromHistory()" style="background:transparent;border:1px solid #333;color:#888;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:10px;" id="btn-load-hist" disabled>Cargar</button>
+        </div>
+        <div id="search-status" style="font-size:10px;color:#666;min-height:16px;"></div>
+
+        <div class="section-title">RPC (Helius API Key)</div>
+        <div style="display:flex;gap:4px;">
+            <input type="text" id="helius-key" placeholder="API key de Helius (gratis)..." style="flex:1;background:#1a1a3e;border:1px solid #333;color:#fff;padding:5px 8px;border-radius:4px;font-size:10px;font-family:monospace;">
+            <button onclick="saveHeliusKey()" style="background:#1a1a3e;border:1px solid #333;color:#4ade80;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:10px;">OK</button>
+        </div>
+        <div id="rpc-status" style="font-size:9px;color:#555;min-height:14px;margin-top:2px;"></div>
+
+        <div class="section-title">Historial</div>
+        <div id="history-list" style="font-size:10px;max-height:120px;overflow-y:auto;">
+            <div style="color:#444;padding:4px;">Cargando...</div>
+        </div>
+
+        <div class="stat-group">
+            <div class="stat-row"><span class="label">Wallets</span><span class="value" id="s-wallets">0</span></div>
+            <div class="stat-row"><span class="label">Transferencias</span><span class="value" id="s-transfers">0</span></div>
+            <div class="stat-row"><span class="label">Total SOL movido</span><span class="value highlight" id="s-total">0</span></div>
+        </div>
+
+        <div class="section-title">Leyenda</div>
+        <div class="legend-item"><div class="dot" style="background:#4ade80;"></div> Origen</div>
+        <div class="legend-item"><div class="dot" style="background:#e94560;"></div> Destino</div>
+        <div class="legend-item"><div class="dot" style="background:#ffd93d;"></div> Intermediaria</div>
+        <div class="legend-item" id="legend-known" style="display:none;"></div>
+        <div class="legend-item" style="margin-top:4px;">
+            <div class="line" style="background:#e94560;"></div>
+            <span>SOL</span>
+            <div class="line" style="background:#4ade80;margin-left:8px;"></div>
+            <span>Token</span>
+        </div>
+
+        <div class="section-title">Controles</div>
+        <button onclick="resetView()">Resetear vista</button>
+        <div class="btn-group">
+            <button class="sec" onclick="toggleParticles()" id="btn-anim">⏸ Pausar</button>
+            <button class="sec" onclick="toggleLabels()" id="btn-labels">Ocultar etiquetas</button>
+        </div>
+        <div style="font-size:10px;color:#444;margin-top:auto;padding-top:12px;">
+            Click nodo → centra &amp; info abajo<br>
+            Arrastra → mueve nodo<br>
+            Scroll → zoom
+        </div>
+    </div>
+
+    <!-- MAIN -->
+    <div id="main-area">
+        <div id="graph-container">
+            <svg></svg>
+            <div id="float-tip"></div>
+        </div>
+        <div id="bottom-section">
+            <div class="bs-header">
+                <h3>MOVIMIENTOS DE DRENAJE</h3>
+                <span id="tx-count">0 transacciones</span>
+            </div>
+            <div id="tx-list"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+let KNOWN = {};
+const GROUP_ORDER = ['origin', 'target', 'intermediary'];
+const GROUP_COLORS = { origin: '#4ade80', target: '#e94560', intermediary: '#ffd93d' };
+const WALLET_COLORS = ['#4ade80','#e94560','#ffd93d','#60a5fa','#c084fc','#fb923c','#34d399','#f472b6','#a78bfa','#2dd4bf'];
+
+let sim, svg, g, particles, pInterval, labelsVisible = true, paused = false, selectedNode = null, highlightedLink = null;
+let allNodes = [], allLinks = [], allTransfers = [], nodeMap = new Map(), linkMap = new Map();
+
+function init() {
+    loadHistory();
+    loadHeliusKey();
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') searchWallet();
+    });
+}
+
+function loadHeliusKey() {
+    fetch('/api/helius-key')
+        .then(r => r.json())
+        .then(data => {
+            if (data.key) {
+                document.getElementById('helius-key').value = data.key;
+                document.getElementById('rpc-status').innerHTML = '<span style="color:#4ade80;">Helius activo</span>';
+            } else {
+                document.getElementById('rpc-status').innerHTML = '<span style="color:#ffd93d;">Sin API key — datos limitados</span>';
+            }
+        })
+        .catch(() => {});
+}
+
+function saveHeliusKey() {
+    const key = document.getElementById('helius-key').value.trim();
+    fetch('/api/helius-key', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key})
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('rpc-status').innerHTML = key ?
+            '<span style="color:#4ade80;">Guardado. Reinicia el servidor para aplicar.</span>' :
+            '<span style="color:#ffd93d;">Key eliminada</span>';
+    })
+    .catch(err => {
+        document.getElementById('rpc-status').innerHTML = '<span style="color:#e94560;">Error: ' + err.message + '</span>';
+    });
+}
+
+function processData(data) {
+    // Filter out transfers with empty from/to
+    data.transfers = data.transfers.filter(t => t.from && t.to);
+    allTransfers = data.transfers;
+    window._drainInfo = data.drain_info || null;
+    window._vulnerability = data.vulnerability || null;
+    if (window._vulnerability) renderTxList();
+    
+    // Build KNOWN map from data
+    KNOWN = {};
+    // Assign deterministic colors to all wallets
+    KNOWN = {};
+    let colorIdx = 0;
+    const walletColors = {};
+    for (const w of data.wallets) {
+        if (!walletColors[w.address]) {
+            walletColors[w.address] = WALLET_COLORS[colorIdx % WALLET_COLORS.length];
+            colorIdx++;
+        }
+        if (w.is_known) {
+            KNOWN[w.address] = { label: w.label, group: 'target', color: walletColors[w.address] };
+        }
+    }
+    
+    // Build nodes
+    nodeMap = new Map();
+    for (const w of data.wallets) {
+        const kw = KNOWN[w.address];
+        let group = kw ? 'target' : 'intermediary';
+        if (w.address === data.source_address) group = 'origin';
+        nodeMap.set(w.address, {
+            id: w.address, label: kw ? kw.label : w.address.slice(0,8)+'..',
+            fullLabel: kw ? kw.label : w.address, group, isKnown: !!kw,
+            color: walletColors[w.address] || '#555',
+            solIn: 0, solOut: 0, tokIn: 0, tokOut: 0, degree: 0,
+        });
+    }
+    // Auto-add missing wallets from transfers
+    for (const t of data.transfers) {
+        if (!nodeMap.has(t.from)) nodeMap.set(t.from, { id: t.from, label: t.from.slice(0,8)+'..', fullLabel: t.from, group: 'intermediary', isKnown: false, color: '#555', solIn:0, solOut:0, tokIn:0, tokOut:0, degree:0 });
+        if (!nodeMap.has(t.to)) nodeMap.set(t.to, { id: t.to, label: t.to.slice(0,8)+'..', fullLabel: t.to, group: 'intermediary', isKnown: false, color: '#555', solIn:0, solOut:0, tokIn:0, tokOut:0, degree:0 });
+    }
+
+    // Filter and aggregate links
+    const minAmt = 0.000001;
+    linkMap = new Map();
+    for (const t of data.transfers) {
+        if (t.amount < minAmt) continue;
+        const key = t.from+'|'+t.to+'|'+t.unit;
+        if (!linkMap.has(key)) linkMap.set(key, { key, source: t.from, target: t.to, amount: 0, unit: t.unit, count: 0, times: [], sigs: [] });
+        const l = linkMap.get(key);
+        l.amount += t.amount; l.count++; l.times.push(t.time); l.sigs.push(t.sig);
+    }
+
+    allLinks = Array.from(linkMap.values());
+    allNodes = Array.from(nodeMap.values());
+
+    // Compute stats
+    for (const n of allNodes) { n.solIn=0; n.solOut=0; n.tokIn=0; n.tokOut=0; n.degree=0; }
+    for (const l of allLinks) {
+        const src = nodeMap.get(l.source), tgt = nodeMap.get(l.target);
+        if (src) { l.unit === 'SOL' ? (src.solOut += l.amount) : (src.tokOut += l.amount); src.degree++; }
+        if (tgt) { l.unit === 'SOL' ? (tgt.solIn += l.amount) : (tgt.tokIn += l.amount); tgt.degree++; }
+    }
+    for (const n of allNodes) n.size = Math.max(10, Math.min(32, 6 + n.degree * 1.5));
+    for (const n of allNodes) if (n.isKnown) n.size = Math.max(n.size, 18);
+
+    // Calculate step order via BFS from source wallet
+    const sourceAddr = document.getElementById('search-input').value.trim();
+    const stepMap = new Map();
+    let stepQueue = [sourceAddr];
+    let stepNum = 1;
+    const visited = new Set();
+    visited.add(sourceAddr);
+    stepMap.set(sourceAddr, stepNum++);
+
+    // Sort transfers chronologically for BFS
+    const sortedForBFS = [...allTransfers].sort((a, b) => a.time.localeCompare(b.time));
+    
+    // BFS through fund flow
+    let maxIterations = 200;
+    while (stepQueue.length > 0 && maxIterations-- > 0) {
+        const nextQueue = [];
+        for (const addr of stepQueue) {
+            for (const t of sortedForBFS) {
+                if (t.from === addr && !visited.has(t.to)) {
+                    visited.add(t.to);
+                    stepMap.set(t.to, stepNum++);
+                    nextQueue.push(t.to);
+                }
+            }
+        }
+        stepQueue = nextQueue;
+    }
+    // Assign step numbers to nodes
+    for (const n of allNodes) {
+        n.step = stepMap.get(n.id) || 0;
+    }
+
+    // Filter out isolated nodes (no connections) from graph rendering
+    const graphNodes = allNodes.filter(n => n.degree > 0);
+    window._graphNodes = graphNodes;
+
+    // Update legend with known wallets
+    const knownEntries = Object.entries(KNOWN);
+    const legendKnown = document.getElementById('legend-known');
+    if (knownEntries.length > 0) {
+        legendKnown.style.display = 'block';
+        legendKnown.innerHTML = knownEntries.map(([addr, kw]) =>
+            `<div class="legend-item"><div class="dot" style="background:${kw.color};"></div> ${kw.label}</div>`
+        ).join('');
+        legendKnown.style.marginTop = '4px';
+    } else {
+        legendKnown.style.display = 'none';
+    }
+
+    // Stats
+    let totalSol = 0;
+    for (const l of allLinks) if (l.unit === 'SOL') totalSol += l.amount;
+    document.getElementById('s-wallets').textContent = graphNodes.length;
+    document.getElementById('s-transfers').textContent = allTransfers.length;
+    document.getElementById('s-total').textContent = totalSol.toFixed(2) + ' SOL';
+
+    populateTxList();
+    renderGraph();
+}
+
+// Helpers for narrative
+function wl(addr) {
+    const kw = KNOWN[addr];
+    return kw ? kw.label : addr.slice(0,4)+'..'+addr.slice(-4);
+}
+function fa(amt) { return amt.toFixed(amt > 1 ? 4 : amt > 0.01 ? 4 : 6); }
+
+function buildNarrative() {
+    const sorted = [...allTransfers].sort((a, b) => a.time.localeCompare(b.time));
+    const steps = [];
+    let stepNum = 0;
+
+    // Find the collector wallet (main recipient from the source/drained wallet)
+    const sourceAddr = document.getElementById('search-input').value.trim();
+    let collectorAddr = '';
+    for (const t of sorted) {
+        if (t.from === sourceAddr && t.to && t.unit === 'SOL') {
+            collectorAddr = t.to;
+            break;
+        }
+    }
+
+    // Find the final destination (last wallet in the chain that doesn't send out)
+    const senders = new Set(sorted.map(t => t.from));
+    const receivers = new Set(sorted.map(t => t.to));
+    const finalWallets = [...receivers].filter(addr => !senders.has(addr) && addr !== sourceAddr);
+
+    // Build DRENADO step but don't push yet (will insert after FALLO)
+    let drainStep = null;
+    if (window._drainInfo && window._drainInfo.balance_before > 0) {
+        const d = window._drainInfo;
+        const lostTx = allTransfers.find(t => t.unit === 'SOL' && t.amount >= d.lost * 0.9);
+        drainStep = {
+            day: lostTx ? lostTx.time.split(' ')[0] : '',
+            timeLabel: lostTx ? lostTx.time.slice(11, 16) : '',
+            badge: 'drain', badgeLabel: 'DRENADO',
+            title: `Wallet drenada: ${d.lost} SOL perdidos (${(d.lost / d.balance_before * 100).toFixed(0)}% del saldo)`,
+            desc: `Saldo antes: ${d.balance_before} SOL → Después: ${d.balance_after} SOL. El atacante vació la wallet en una transacción automática.`,
+            highlight: lostTx || null,
+            subs: lostTx ? [lostTx] : []
+        };
+    }
+
+    // Group by day
+    stepNum = 0;
+    const byDay = new Map();
+    for (const t of sorted) {
+        const day = t.time.split(' ')[0];
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day).push(t);
+    }
+
+    const dayKeys = Array.from(byDay.keys()).sort();
+
+    // For each day, group into time-clustered steps
+    for (const day of dayKeys) {
+        const txs = byDay.get(day);
+        txs.sort((a, b) => a.time.localeCompare(b.time));
+
+        // Cluster by time proximity (2 min window)
+        const clusters = [];
+        let cur = [];
+        for (const t of txs) {
+            if (cur.length === 0) { cur.push(t); continue; }
+            const dt = Math.abs(new Date(t.time) - new Date(cur[0].time));
+            if (dt < 120000) { cur.push(t); continue; }
+            clusters.push(cur);
+            cur = [t];
+        }
+        if (cur.length > 0) clusters.push(cur);
+
+        for (const cluster of clusters) {
+            stepNum++;
+            const totalAmt = cluster.reduce((s, t) => s + t.amount, 0);
+            const isSol = cluster.some(t => t.unit === 'SOL');
+            const isToken = cluster.some(t => t.unit !== 'SOL');
+            const fromWallets = [...new Set(cluster.map(t => t.from))];
+            const toWallets = [...new Set(cluster.map(t => t.to))];
+            const mainTx = cluster.reduce((a, b) => a.amount > b.amount ? a : b);
+
+            // Detect swaps: wallet receives SOL and sends token (or vice versa) within cluster
+            let isSwap = false;
+            if (isSol && isToken) {
+                for (const w of fromWallets) {
+                    const receivesSol = cluster.some(t => t.to === w && t.unit === 'SOL');
+                    const sendsToken = cluster.some(t => t.from === w && t.unit !== 'SOL');
+                    if (receivesSol && sendsToken) { isSwap = true; break; }
+                }
+                if (!isSwap) {
+                    for (const w of toWallets) {
+                        const sendsSol = cluster.some(t => t.from === w && t.unit === 'SOL');
+                        const receivesToken = cluster.some(t => t.to === w && t.unit !== 'SOL');
+                        if (sendsSol && receivesToken) { isSwap = true; break; }
+                    }
+                }
+            }
+
+            // Detect FALLO: transaction that caused the vulnerability
+            const vulnSig = window._vulnerability ? window._vulnerability.sig_short : null;
+            const isVulnerability = vulnSig && cluster.some(t => t.sig === vulnSig);
+
+            // Detect RECIBIDO: funds arriving at collector
+            const isRecibido = !isSwap && !isVulnerability && collectorAddr && cluster.some(t => t.to === collectorAddr && t.unit === 'SOL');
+
+            // Detect DESTINO FINAL: funds arriving at wallet that doesn't send out
+            const isFinal = !isSwap && !isRecibido && !isVulnerability && finalWallets.some(addr => toWallets.includes(addr));
+
+            let badge, badgeLabel;
+            if (isVulnerability) { badge = 'vulnerability'; badgeLabel = 'FALLO'; }
+            else if (isSwap) { badge = 'swap'; badgeLabel = 'SWAP'; }
+            else if (isRecibido) { badge = 'receive'; badgeLabel = 'RECIBIDO'; }
+            else if (isFinal) { badge = 'final'; badgeLabel = 'DESTINO'; }
+            else if (isToken && !isSol) { badge = 'swap'; badgeLabel = 'TOKEN'; }
+            else if (cluster.length >= 5) { badge = 'consolidate'; badgeLabel = 'MÚLTIPLE'; }
+            else { badge = 'move'; badgeLabel = 'MOVIMIENTO'; }
+
+            let title, desc;
+            if (isSwap) {
+                const solTx = cluster.find(t => t.unit === 'SOL');
+                const tokenTx = cluster.find(t => t.unit !== 'SOL');
+                title = `Swap: ${fa(solTx.amount)} SOL → ${fa(tokenTx.amount)} token`;
+                desc = `Conversión de SOL a tokens vía DEX en la wallet ${wl(mainTx.from)}. Los fondos cambian de forma para dificultar el rastreo.`;
+            } else if (isVulnerability) {
+                title = `FALLO: aprobación de programa malicioso`;
+                desc = `El usuario interactuó con un programa desconocido que permitió al atacante drenar la wallet. Esta transacción otorgó los permisos para el robo.`;
+            } else if (isRecibido) {
+                title = `Recibido: ${fa(totalAmt)} SOL en ${wl(collectorAddr)}`;
+                desc = `Los fondos drenados llegan al wallet recolector ${wl(collectorAddr)}. El atacante agrupa los fondos aquí.`;
+            } else if (isFinal) {
+                const finalAddr = toWallets.find(addr => finalWallets.includes(addr));
+                title = `Destino final: ${fa(totalAmt)} ${isToken ? 'tokens' : 'SOL'} en ${wl(finalAddr || mainTx.to)}`;
+                desc = `Los fondos llegan a su destino final. Esta wallet no envía más fondos — posible exchange, mixer o wallet de larga data.`;
+            } else {
+                title = `${wl(mainTx.from)} → ${wl(mainTx.to)} (${fa(totalAmt)} ${isToken ? 'token' : 'SOL'})`;
+                desc = fromWallets.length === 1 && toWallets.length === 1 ?
+                    `${wl(mainTx.from)} envió ${fa(totalAmt)} ${isToken ? 'tokens' : 'SOL'} a ${wl(mainTx.to)}` :
+                    `De ${fromWallets.length} origen(es) a ${toWallets.length} destino(s) — ${fa(totalAmt)} ${isToken ? 'tokens' : 'SOL'} en total`;
+            }
+
+            steps.push({
+                stepNum, day, timeLabel: cluster[0].time.slice(11, 16), badge, badgeLabel,
+                title, desc, highlight: mainTx, subs: cluster
+            });
+        }
+    }
+
+    // Insert DRENADO step after FALLO (or at start if no FALLO)
+    if (drainStep) {
+        const falloIdx = steps.findIndex(s => s.badgeLabel === 'FALLO');
+        const insertAt = falloIdx >= 0 ? falloIdx + 1 : 0;
+        steps.splice(insertAt, 0, drainStep);
+    }
+
+    // Renumber all steps
+    steps.forEach((s, i) => { s.stepNum = i + 1; });
+
+    renderNarrative(steps);
+}
+
+function renderNarrative(steps) {
+    const list = document.getElementById('tx-list');
+    let count = 0;
+    steps.forEach(s => count += s.subs.length);
+    document.getElementById('tx-count').textContent = count + ' transacciones en ' + steps.length + ' pasos';
+    list.innerHTML = '';
+
+    let lastDay = '';
+    for (const [si, step] of steps.entries()) {
+        // Day header
+        if (step.day !== lastDay) {
+            lastDay = step.day;
+            const dh = document.createElement('div');
+            dh.className = 'day-header';
+            dh.textContent = step.day;
+            list.appendChild(dh);
+        }
+
+        const el = document.createElement('div');
+        el.className = 'narrative-step';
+        el.setAttribute('data-badge', step.badge);
+
+        // Build subs HTML
+        let subsHtml = '';
+        if (step.subs.length > 0) {
+            subsHtml = '<div class="ns-sublist">';
+            for (const sub of step.subs) {
+                const key = sub.from+'|'+sub.to+'|'+sub.unit;
+                subsHtml += `<div class="ns-subtx" data-key="${key}">
+                    <span class="s-wallet">${wl(sub.from)}</span>
+                    <span class="s-arrow">→</span>
+                    <span class="s-wallet">${wl(sub.to)}</span>
+                    <span class="s-amt">${fa(sub.amount)}</span>
+                    <span class="s-unit">${sub.unit}</span>
+                    <span class="s-time">${sub.time.slice(11, 19)}</span>
+                </div>`;
+            }
+            subsHtml += '</div>';
+        }
+
+        el.innerHTML = `
+            <div class="ns-header">
+                <span class="ns-badge ${step.badge}">${step.badgeLabel}</span>
+                <span class="ns-time-label">${step.timeLabel}</span>
+                <span class="ns-title">Paso ${step.stepNum} · ${step.title}</span>
+            </div>
+            <div class="ns-desc">${step.desc}</div>
+            ${subsHtml}
+        `;
+
+        // Click on step card highlights the main transfer
+        el.addEventListener('click', (e) => {
+            if (e.target.closest('.ns-subtx')) return;
+            if (step.highlight) {
+                const key = step.highlight.from+'|'+step.highlight.to+'|'+step.highlight.unit;
+                highlightEdge(key);
+                list.querySelectorAll('.narrative-step.active').forEach(r => r.classList.remove('active'));
+                el.classList.add('active');
+                list.querySelectorAll('.ns-subtx.active').forEach(r => r.classList.remove('active'));
+            }
+        });
+
+        // Click on sub-transaction
+        el.querySelectorAll('.ns-subtx').forEach(subEl => {
+            subEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const key = subEl.dataset.key;
+                highlightEdge(key);
+                list.querySelectorAll('.narrative-step.active').forEach(r => r.classList.remove('active'));
+                el.classList.add('active');
+                list.querySelectorAll('.ns-subtx.active').forEach(r => r.classList.remove('active'));
+                subEl.classList.add('active');
+            });
+        });
+
+        list.appendChild(el);
+    }
+}
+
+function populateTxList() { buildNarrative(); }
+
+// === API FUNCTIONS ===
+function searchWallet() {
+    const input = document.getElementById('search-input');
+    const addr = input.value.trim();
+    if (!addr || addr.length < 32) {
+        document.getElementById('search-status').innerHTML = '<span style="color:#e94560;">Dirección inválida</span>';
+        return;
+    }
+    const status = document.getElementById('search-status');
+    status.innerHTML = '<span class="spinner"></span> Cargando transacciones...';
+    window._autoTraced = false;
+
+    fetch('/api/transactions/' + encodeURIComponent(addr))
+        .then(r => r.json())
+        .then(data => {
+            const txs = data.txs || data;
+            if (txs.length === 0) {
+                status.innerHTML = '<span style="color:#ffd93d;">Sin transacciones — </span><a href="https://dashboard.helius.dev/api-keys" target="_blank" style="color:#4ade80;font-size:10px;">Añade API key de Helius</a>';
+                return;
+            }
+            const afterCount = txs.filter(t => t.phase === 'after').length;
+            const beforeCount = txs.filter(t => t.phase === 'before').length;
+            status.innerHTML = `<span style="color:#4ade80;">${txs.length} transacciones</span>` +
+                (data.drain_sig ? ` <span style="color:#e94560;">· Drenaje detectado</span>` : '');
+            showTxList(addr, txs, data.drain_sig);
+        })
+        .catch(err => {
+            status.innerHTML = '<span style="color:#e94560;">Error: ' + err.message + '</span>';
+        });
+}
+
+function showTxList(address, transactions, drainSig) {
+    window._txListData = {address, transactions, drainSig};
+    renderTxList();
+}
+
+function renderTxList() {
+    const {address, transactions, drainSig} = window._txListData || {};
+    if (!address) return;
+    const list = document.getElementById('tx-list');
+    document.getElementById('tx-count').textContent = transactions.length + ' transacciones';
+    list.innerHTML = '';
+
+    const vuln = window._vulnerability;
+
+    // Sort ALL transactions by date ascending
+    const sorted = [...transactions].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+    function addTx(tx) {
+        const el = document.createElement('div');
+        el.className = 'narrative-step';
+        el.style.cursor = 'pointer';
+
+        const timeStr = tx.time.slice(11, 19);
+        const dateStr = tx.time.slice(0, 10);
+        const isDrain = drainSig && tx.sig === drainSig;
+        const isVuln = vuln && tx.sig === vuln.sig;
+
+        let badgeHtml = '';
+        if (isVuln) badgeHtml = '<span style="margin-left:auto;font-size:9px;background:#e94560;color:#fff;padding:1px 6px;border-radius:3px;font-weight:600;">FALLO</span>';
+        else if (isDrain) badgeHtml = '<span style="margin-left:auto;font-size:9px;background:#ff6b6b;color:#fff;padding:1px 6px;border-radius:3px;font-weight:600;">DRENADO</span>';
+
+        el.innerHTML = `
+            <div class="ns-header">
+                <span class="ns-time-label" style="color:#888;">${dateStr} ${timeStr}</span>
+                <span class="ns-title" style="font-size:11px;font-family:monospace;color:#999;">${tx.sig_short}..</span>
+                ${badgeHtml}
+            </div>
+        `;
+
+        el.addEventListener('click', () => {
+            traceFromTx(address, tx.sig);
+            list.querySelectorAll('.narrative-step.active').forEach(r => r.classList.remove('active'));
+            el.classList.add('active');
+        });
+        el.addEventListener('mouseenter', () => { el.style.background = 'rgba(255,255,255,0.03)'; });
+        el.addEventListener('mouseleave', () => { el.style.background = ''; });
+        list.appendChild(el);
+    }
+
+    // Single section: all txs sorted by date, with FALLO/DRENADO badges
+    if (sorted.length > 0) {
+        const hdr = document.createElement('div');
+        hdr.style.cssText = 'padding:8px 10px;font-size:11px;font-weight:600;color:#4ade80;border-bottom:1px solid #1a1a3e;background:rgba(255,255,255,0.02);';
+        hdr.textContent = 'MOVIMIENTOS';
+        list.appendChild(hdr);
+        sorted.forEach(tx => addTx(tx));
+    }
+
+    // Auto-trace from drain if detected (only once)
+    if (drainSig && !window._autoTraced) {
+        window._autoTraced = true;
+        setTimeout(() => traceFromTx(address, drainSig), 300);
+    }
+}
+
+function traceFromTx(address, sig) {
+    const status = document.getElementById('search-status');
+    status.innerHTML = '<span class="spinner"></span> Rastreando desde esta transacción...';
+
+    const depth = parseInt(document.getElementById('hops-select').value) || 2;
+
+    fetch('/api/trace-from-tx', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sig: sig, address: address, depth: depth})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            status.innerHTML = '<span style="color:#e94560;">Error: ' + data.error + '</span>';
+            return;
+        }
+        if (data.wallets.length === 0 && data.transfers.length === 0) {
+            status.innerHTML = '<span style="color:#ffd93d;">Sin datos — </span><a href="https://dashboard.helius.dev/api-keys" target="_blank" style="color:#4ade80;font-size:10px;">Añade API key de Helius</a>';
+            return;
+        }
+        status.innerHTML = '<span style="color:#4ade80;">' + data.wallets.length + ' wallets, ' + data.transfers.length + ' movimientos</span>';
+        processData({wallets: data.wallets, transfers: data.transfers, is_drain: data.is_drain, drain_info: data.drain_info, vulnerability: data.vulnerability, source_address: address});
+    })
+    .catch(err => {
+        status.innerHTML = '<span style="color:#e94560;">Error: ' + err.message + '</span>';
+    });
+}
+
+function loadHistory() {
+    fetch('/api/history')
+        .then(r => r.json())
+        .then(history => {
+            const list = document.getElementById('history-list');
+            if (history.length === 0) {
+                list.innerHTML = '<div style="color:#444;padding:4px;">Sin búsquedas previas</div>';
+                document.getElementById('btn-load-hist').disabled = true;
+                return;
+            }
+            list.innerHTML = '';
+            for (const h of history) {
+                const item = document.createElement('div');
+                item.className = 'hist-item';
+                const statusClass = h.status === 'completed' ? 'done' : h.status === 'failed' ? 'fail' : 'proc';
+                const addrShort = h.wallet_address.slice(0,4) + '..' + h.wallet_address.slice(-4);
+                item.innerHTML = `
+                    <span class="hist-addr">${addrShort}</span>
+                    <span class="hist-status ${statusClass}">${h.wallet_count || 0} wallets</span>
+                    <span class="hist-del" onclick="event.stopPropagation();deleteHistoryItem('${h.wallet_address}')">✕</span>
+                `;
+                item.addEventListener('click', () => {
+                    document.getElementById('search-input').value = h.wallet_address;
+                    searchWallet();
+                });
+                list.appendChild(item);
+            }
+        });
+}
+
+function deleteHistoryItem(address) {
+    fetch('/api/trace/' + encodeURIComponent(address), {method: 'DELETE'})
+        .then(() => loadHistory());
+}
+
+function loadFromHistory() {
+    const selected = document.querySelector('#history-list .hist-item.selected');
+    if (selected) selected.click();
+    document.getElementById('btn-load-hist').disabled = true;
+}
+
+
+
+function renderGraph() {
+    const container = document.getElementById('graph-container');
+    const rect = container.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    const svgEl = container.querySelector('svg');
+    svg = d3.select(svgEl);
+    svg.selectAll('*').remove();
+
+    const graphNodes = window._graphNodes || allNodes;
+
+    const defs = svg.append('defs');
+    // Glow
+    ['#ff4444','#cc0000','#ff6b6b','#ffd93d'].forEach(c => {
+        const fid = 'glow-'+c.replace('#','');
+        const f = defs.append('filter').attr('id', fid);
+        f.append('feGaussianBlur').attr('stdDeviation', 3).attr('result','b');
+        f.append('feMerge').append('feMergeNode').attr('in','b');
+        f.append('feMerge').append('feMergeNode').attr('in','SourceGraphic');
+    });
+    // Arrow markers - sleek chevron style
+    defs.append('marker').attr('id', 'arrow-sol').attr('viewBox', '0 0 8 8').attr('refX', 14).attr('refY', 4).attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto').append('path').attr('d', 'M 0 0 L 6 4 L 0 8').attr('fill', 'none').attr('stroke', '#e94560').attr('stroke-width', 1.2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+    defs.append('marker').attr('id', 'arrow-token').attr('viewBox', '0 0 8 8').attr('refX', 14).attr('refY', 4).attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto').append('path').attr('d', 'M 0 0 L 6 4 L 0 8').attr('fill', 'none').attr('stroke', '#4ade80').attr('stroke-width', 1.2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+    defs.append('marker').attr('id', 'arrow-active').attr('viewBox', '0 0 8 8').attr('refX', 14).attr('refY', 4).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto').append('path').attr('d', 'M 0 0 L 6 4 L 0 8').attr('fill', 'none').attr('stroke', '#fff').attr('stroke-width', 1.5).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+
+    g = svg.append('g');
+
+    const zoom = d3.zoom().scaleExtent([0.1, 6]).on('zoom', e => g.attr('transform', e.transform));
+    svg.call(zoom);
+    svg.insert('rect','g').attr('width',W).attr('height',H).attr('fill','none').attr('pointer-events','all');
+
+    const maxAmt = Math.max(...allLinks.map(l => l.amount), 0.001);
+
+    // EDGES - CURVED
+    const edgeG = g.append('g');
+    const edgePaths = edgeG.selectAll('path').data(allLinks).join('path')
+        .attr('class', 'edge-path')
+        .attr('stroke', l => l.unit === 'SOL' ? '#e94560' : '#4ade80')
+        .attr('stroke-width', l => Math.max(0.5, Math.min(6, 1 + (l.amount/maxAmt)*5)))
+        .attr('stroke-opacity', l => Math.max(0.15, Math.min(0.7, l.amount/maxAmt + 0.15)))
+        .attr('d', l => {
+            const src = allNodes.find(n => n.id === l.source);
+            const tgt = allNodes.find(n => n.id === l.target);
+            if (!src || !tgt) return '';
+            const dx = tgt.x - src.x, dy = tgt.y - src.y;
+            const cx = (src.x + tgt.x)/2, cy = (src.y + tgt.y)/2;
+            const curvature = 0.3;
+            const nx = -dy, ny = dx;
+            const cpx = cx + nx * curvature, cpy = cy + ny * curvature;
+            return `M${src.x},${src.y} Q${cpx},${cpy} ${tgt.x},${tgt.y}`;
+        });
+
+    const edgeLabels = edgeG.selectAll('text').data(allLinks).join('text')
+        .attr('class', 'edge-label')
+        .attr('text-anchor', 'middle')
+        .text(l => `${l.amount.toFixed(l.amount > 1 ? 2 : l.amount > 0.01 ? 4 : 6)} ${l.unit}`)
+        .attr('dy', -8);
+
+    // PARTICLES
+    particles = edgeG.selectAll('circle').data(allLinks.map(l => ({ ...l, offset: Math.random() }))).join('circle')
+        .attr('class', 'flow-particle')
+        .attr('r', l => Math.max(1.5, Math.min(3.5, 1 + (l.amount/maxAmt)*2.5)))
+        .attr('fill', l => l.unit === 'SOL' ? '#ff8888' : '#88ff88');
+
+    // NODES
+    const nodeG = g.append('g');
+    const nodeCircles = nodeG.selectAll('circle').data(allNodes).join('circle')
+        .attr('class', 'node-circle')
+        .attr('r', n => n.size)
+        .attr('fill', n => n.color)
+        .attr('stroke', n => d3.color(n.color).brighter(0.3))
+        .attr('stroke-width', n => n.isKnown ? 3 : 1)
+        .attr('filter', n => n.isKnown ? 'url(#glow-'+n.color.replace('#','')+')' : null)
+        .on('mouseover', (e, n) => showTip(e, n))
+        .on('mouseout', hideTip)
+        .on('click', (e, n) => selectNode(n))
+        .call(d3.drag().on('start', (e,n) => { if (!e.active) sim.alphaTarget(0.3).restart(); n.fx = n.x; n.fy = n.y; }).on('drag', (e,n) => { n.fx = e.x; n.fy = e.y; }).on('end', (e,n) => { if (!e.active) sim.alphaTarget(0); n.fx = null; n.fy = null; }));
+
+    const nodeLabels = nodeG.selectAll('text.node-label').data(allNodes).join('text')
+        .attr('class', 'node-label')
+        .attr('text-anchor', 'middle')
+        .attr('dy', n => n.size + 12)
+        .attr('fill', n => n.isKnown ? '#fff' : '#888')
+        .attr('font-size', n => n.isKnown ? 11 : 8)
+        .attr('font-weight', n => n.isKnown ? 'bold' : 'normal')
+        .text(n => n.label);
+
+    const nodeSubs = nodeG.selectAll('text.node-sublabel').data(allNodes).join('text')
+        .attr('class', 'node-label')
+        .attr('text-anchor', 'middle')
+        .attr('dy', n => n.size + 24)
+        .attr('fill', '#555')
+        .attr('font-size', 8)
+        .text(n => { const net = n.solIn - n.solOut; return net ? (net > 0 ? '+' : '') + net.toFixed(3) + ' SOL' : ''; });
+
+    // Step numbers inside circles
+    const nodeSteps = nodeG.selectAll('text.node-step').data(allNodes.filter(n => n.step > 0)).join('text')
+        .attr('class', 'node-step')
+        .attr('text-anchor', 'middle')
+        .attr('dy', 4)
+        .attr('fill', '#fff')
+        .attr('font-size', n => n.size > 14 ? 11 : 9)
+        .attr('font-weight', 'bold')
+        .attr('pointer-events', 'none')
+        .text(n => n.step);
+
+    // SIMULATION - horizontal flow layout (source left, flow right)
+    sim = d3.forceSimulation(graphNodes)
+        .force('link', d3.forceLink(allLinks).id(d => d.id).distance(80).strength(0.3))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(W/2, H/2))
+        .force('x', d3.forceX(d => {
+            const idx = GROUP_ORDER.indexOf(d.group);
+            return W * (0.05 + (idx >= 0 ? idx : 3) * 0.25);
+        }).strength(0.15))
+        .force('y', d3.forceY(d => H/2).strength(0.04))
+        .force('collision', d3.forceCollide(d => d.size + 30))
+        .on('tick', () => {
+            // Update node positions
+            nodeCircles.attr('cx', n => n.x).attr('cy', n => n.y);
+            nodeLabels.attr('x', n => n.x).attr('y', n => n.y);
+            nodeSubs.attr('x', n => n.x).attr('y', n => n.y);
+            nodeSteps.attr('x', n => n.x).attr('y', n => n.y);
+            // Update curved edges
+            edgePaths.attr('d', l => {
+                const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+                const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+                if (!src || !tgt) return '';
+                const sx = src.x, sy = src.y, tx = tgt.x, ty = tgt.y;
+                const cx = (sx+tx)/2, cy = (sy+ty)/2;
+                const nx = -(ty-sy), ny = (tx-sx);
+                const len = Math.sqrt(nx*nx+ny*ny) || 1;
+                return `M${sx},${sy} Q${cx + nx/len*40},${cy + ny/len*40} ${tx},${ty}`;
+            });
+            edgeLabels.attr('x', l => {
+                const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+                const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+                return src && tgt ? (src.x+tgt.x)/2 : 0;
+            }).attr('y', l => {
+                const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+                const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+                return src && tgt ? (src.y+tgt.y)/2 - 12 : 0;
+            });
+            // Update particles
+            particles.attr('cx', l => {
+                const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+                const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+                return src && tgt ? src.x + (tgt.x - src.x) * l.offset : 0;
+            }).attr('cy', l => {
+                const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+                const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+                return src && tgt ? src.y + (tgt.y - src.y) * l.offset : 0;
+            });
+        });
+
+    // Particle animation
+    if (pInterval) clearInterval(pInterval);
+    pInterval = setInterval(() => {
+        if (paused || !particles) return;
+        particles.data().forEach(l => { l.offset += 0.003 * (0.3 + l.amount * 0.7); if (l.offset > 1) l.offset = 0; });
+        particles.attr('cx', l => {
+            const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+            const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+            return src && tgt ? src.x + (tgt.x - src.x) * l.offset : 0;
+        }).attr('cy', l => {
+            const src = allNodes.find(n => n.id === l.source.id || n.id === l.source);
+            const tgt = allNodes.find(n => n.id === l.target.id || n.id === l.target);
+            return src && tgt ? src.y + (tgt.y - src.y) * l.offset : 0;
+        });
+    }, 40);
+
+    // Focus on the source wallet initially
+    setTimeout(() => {
+        const origin = allNodes.find(n => n.group === 'origin');
+        if (origin) centerOn(origin, 0.8);
+        else {
+            const collector = allNodes.find(n => n.group === 'collector');
+            if (collector) centerOn(collector, 0.8);
+        }
+    }, 1500);
+
+    window.addEventListener('resize', () => {
+        const r = document.getElementById('graph-container').getBoundingClientRect();
+        svg.attr('width', r.width).attr('height', r.height);
+        sim.force('center', d3.forceCenter(r.width/2, r.height/2));
+        sim.alpha(0.3).restart();
+    });
+}
+
+// === UTILITIES ===
+const tip = document.getElementById('float-tip');
+function showTip(e, n) {
+    const kw = KNOWN[n.id];
+    let html = `<div class="tip-title">${kw ? kw.label : 'Wallet'}</div><div class="tip-addr">${n.id}</div>`;
+    html += `<div style="margin-top:4px;"><span class="tip-green">+${n.solIn.toFixed(4)} SOL</span> &nbsp; <span class="tip-red">-${n.solOut.toFixed(4)} SOL</span></div>`;
+    if (n.tokIn > 0 || n.tokOut > 0) html += `<div style="color:#888;font-size:10px;">Tokens: ${n.tokIn.toFixed(1)} in / ${n.tokOut.toFixed(1)} out</div>`;
+    
+    // Connected links
+    const conn = allLinks.filter(l => l.source === n.id || l.target === n.id || l.source.id === n.id || l.target.id === n.id);
+    if (conn.length > 0) {
+        html += `<div style="margin-top:4px;border-top:1px solid #222;padding-top:4px;font-size:10px;color:#aaa;">`;
+        conn.slice(0,4).forEach(l => {
+            const srcId = l.source.id || l.source, tgtId = l.target.id || l.target;
+            const dir = srcId === n.id ? '→' : '←';
+            html += `<div>${dir} ${l.amount.toFixed(4)} ${l.unit} ${l.times[0]?.slice(-8)||''}</div>`;
+        });
+        if (conn.length > 4) html += `<div style="color:#555;">+${conn.length-4} más</div>`;
+        html += `</div>`;
+    }
+    
+    tip.innerHTML = html;
+    tip.style.display = 'block';
+    let tx = e.clientX + 15, ty = e.clientY - 10;
+    if (tx + 320 > window.innerWidth) tx = e.clientX - 335;
+    if (ty + 180 > window.innerHeight) ty = window.innerHeight - 195;
+    if (ty < 0) ty = 10;
+    tip.style.left = tx + 'px'; tip.style.top = ty + 'px';
+
+    // Highlight connections
+    g.selectAll('.node-circle').attr('opacity', no => conn.some(l => (l.source.id||l.source) === no.id || (l.target.id||l.target) === no.id) || no.id === n.id ? 1 : 0.12);
+    g.selectAll('.edge-path').attr('opacity', l => {
+        const s = l.source.id||l.source, t = l.target.id||l.target;
+        return s === n.id || t === n.id ? 0.9 : 0.04;
+    });
+    g.selectAll('.edge-label').attr('opacity', l => {
+        const s = l.source.id||l.source, t = l.target.id||l.target;
+        return s === n.id || t === n.id ? 1 : 0;
+    });
+}
+
+function hideTip() {
+    tip.style.display = 'none';
+    if (!selectedNode && !highlightedLink) {
+        g.selectAll('.node-circle').attr('opacity', 1).classed('faded', false);
+        g.selectAll('.edge-path').attr('opacity', 1).classed('active', false).classed('faded', false).attr('marker-end', null);
+        g.selectAll('.edge-label').attr('opacity', 1);
+    }
+}
+
+function selectNode(n) {
+    selectedNode = n;
+    centerOn(n, 1.2);
+    // Highlight connected edges on node click
+    clearHighlight();
+    const conn = allLinks.filter(l => l.source === n.id || l.target === n.id || l.source.id === n.id || l.target.id === n.id);
+    conn.forEach(l => {
+        g.selectAll('.edge-path').filter(e => e.key === l.key).classed('active', true);
+    });
+    // Fade non-connected nodes
+    g.selectAll('.node-circle').filter(no => !conn.some(l => (l.source.id||l.source) === no.id || (l.target.id||l.target) === no.id) && no.id !== n.id).classed('faded', true);
+    g.selectAll('.edge-path').filter(e => !conn.some(l => l.key === e.key)).classed('faded', true);
+}
+
+function centerOn(n, scale) {
+    const rect = document.getElementById('graph-container').getBoundingClientRect();
+    const transform = d3.zoomIdentity.translate(rect.width/2, rect.height/2).scale(scale || 1).translate(-n.x, -n.y);
+    svg.transition().duration(600).call(d3.zoom().transform, transform);
+}
+
+function clearHighlight() {
+    highlightedLink = null;
+    selectedNode = null;
+    g.selectAll('.node-circle').attr('opacity', 1).classed('faded', false);
+    g.selectAll('.edge-path').attr('opacity', 1).classed('active', false).classed('faded', false).attr('marker-end', null);
+    g.selectAll('.edge-label').attr('opacity', 1);
+    g.selectAll('.flow-particle').attr('opacity', 0.6);
+    document.querySelectorAll('#tx-list .narrative-step.active, #tx-list .ns-subtx.active').forEach(r => r.classList.remove('active'));
+}
+
+function highlightEdge(key) {
+    clearHighlight();
+    highlightedLink = key;
+    const link = allLinks.find(l => l.key === key);
+    g.selectAll('.edge-path').each(function(e) {
+        if (e.key === key) {
+            const sel = d3.select(this);
+            sel.classed('active', true);
+            sel.attr('marker-end', 'url(#arrow-active)');
+        } else {
+            d3.select(this).classed('faded', true);
+        }
+    });
+    // Highlight source and target nodes
+    if (link) {
+        const srcNode = allNodes.find(n => n.id === link.source);
+        const tgtNode = allNodes.find(n => n.id === link.target);
+        g.selectAll('.node-circle').each(function(n) {
+            if (n.id === link.source || n.id === link.target) {
+                d3.select(this).classed('faded', false);
+            } else {
+                d3.select(this).classed('faded', true);
+            }
+        });
+        // Center on the midpoint
+        if (srcNode && tgtNode) {
+            const mx = (srcNode.x + tgtNode.x) / 2;
+            const my = (srcNode.y + tgtNode.y) / 2;
+            const rect = document.getElementById('graph-container').getBoundingClientRect();
+            const transform = d3.zoomIdentity.translate(rect.width/2, rect.height/2).scale(1.5).translate(-mx, -my);
+            svg.transition().duration(400).call(d3.zoom().transform, transform);
+        }
+    }
+    
+}
+
+function closePanel() { clearHighlight(); }
+
+function resetView() {
+    clearHighlight();
+    selectedNode = null; highlightedLink = null;
+    const rect = document.getElementById('graph-container').getBoundingClientRect();
+    svg.transition().duration(500).call(d3.zoom().transform, d3.zoomIdentity);
+    document.querySelectorAll('#tx-list .narrative-step.active, #tx-list .ns-subtx.active').forEach(r => r.classList.remove('active'));
+    g.selectAll('.node-circle').attr('opacity', 1).classed('faded', false);
+    g.selectAll('.edge-path').attr('opacity', 1).classed('active', false).classed('faded', false).attr('marker-end', null);
+    g.selectAll('.edge-label').attr('opacity', 1);
+}
+
+function toggleParticles() { paused = !paused; document.getElementById('btn-anim').textContent = paused ? '▶ Reanudar' : '⏸ Pausar'; }
+function toggleLabels() {
+    labelsVisible = !labelsVisible;
+    g.selectAll('.node-label').attr('opacity', labelsVisible ? 1 : 0);
+    g.selectAll('.node-sublabel').attr('opacity', labelsVisible ? 1 : 0);
+    g.selectAll('.edge-label').attr('opacity', labelsVisible ? 1 : 0);
+    document.getElementById('btn-labels').textContent = labelsVisible ? 'Ocultar etiquetas' : 'Mostrar etiquetas';
+}
+
+init();
+</script>
+</body>
+</html>
