@@ -87,7 +87,6 @@ Abrir `http://localhost:5000/`.
 
 ```
 4xckmPwFBX39kGUeNkawPHj4KHrCaA9LPChAAZsSVXwM
-Seed: affair clown innocent seed moral gesture perfect open wink symptom wasp fat
 Drenada: Jul 6 2026
 FALLO: Jul 4 2026 — aprobación del programa GM1NtvvnSXUptTrMCqbogAdZJydZSNv98DoU5AZVLmGh
 ```
