@@ -848,6 +848,7 @@ function buildNarrative() {
             // Detect FALLO: transaction that caused the vulnerability
             const vulnSig = window._vulnerability ? window._vulnerability.sig_short : null;
             const isVulnerability = vulnSig && cluster.some(t => t.sig === vulnSig);
+            if (isVulnerability) window._falloInCluster = true;
 
             // Detect RECIBIDO: funds arriving at collector
             const isRecibido = !isSwap && !isVulnerability && collectorAddr && cluster.some(t => t.to === collectorAddr && t.unit === 'SOL');
@@ -873,6 +874,7 @@ function buildNarrative() {
             } else if (isVulnerability) {
                 title = `FALLO: aprobación de programa malicioso`;
                 desc = `El usuario interactuó con un programa desconocido que permitió al atacante drenar la wallet. Esta transacción otorgó los permisos para el robo.`;
+                window._falloInCluster = true;
             } else if (isRecibido) {
                 title = `Recibido: ${fa(totalAmt)} SOL en ${wl(collectorAddr)}`;
                 desc = `Los fondos drenados llegan al wallet recolector ${wl(collectorAddr)}. El atacante agrupa los fondos aquí.`;
@@ -889,7 +891,8 @@ function buildNarrative() {
 
             steps.push({
                 stepNum, day, timeLabel: cluster[0].time.slice(11, 16), badge, badgeLabel,
-                title, desc, highlight: mainTx, subs: cluster
+                title, desc, highlight: mainTx, subs: cluster,
+                vulnData: badgeLabel === 'FALLO' ? window._vulnerability : null
             });
         }
     }
@@ -904,7 +907,7 @@ function buildNarrative() {
             badge: 'vulnerability', badgeLabel: 'FALLO',
             title: 'FALLO: aprobación de programa malicioso',
             desc: 'El usuario aprobó un programa desconocido que permitió al atacante drenar la wallet. Esta transacción otorgó los permisos para el robo.',
-            highlight: null, subs: []
+            highlight: null, subs: [], vulnData: window._vulnerability
         });
     }
 
@@ -961,6 +964,28 @@ function renderNarrative(steps) {
             subsHtml += '</div>';
         }
 
+        // Build forensic details for FALLO step
+        let forensicsHtml = '';
+        if (step.badgeLabel === 'FALLO' && step.vulnData) {
+            const vd = step.vulnData;
+            const progShort = vd.program_id ? vd.program_id.slice(0,8)+'..'+vd.program_id.slice(-4) : '';
+            forensicsHtml = `
+                <div style="margin:6px 0 0 10px;padding:8px 10px;background:rgba(233,69,96,0.08);border:1px solid rgba(233,69,96,0.15);border-radius:6px;font-size:10px;line-height:1.7;">
+                    <div style="color:#ff6b6b;font-weight:600;margin-bottom:4px;">🔬 Datos forenses</div>
+                    <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;color:#aaa;">
+                        <span style="color:#888;">Programa:</span>
+                        <span style="font-family:monospace;font-size:9px;color:#ff6b6b;word-break:break-all;">${vd.program_id || 'desconocido'}</span>
+                        <span style="color:#888;">Ver:</span>
+                        <span><a href="https://solscan.io/account/${vd.program_id || ''}" target="_blank" style="color:#4ade80;">Solscan ↗</a> · <a href="https://explorer.solana.com/address/${vd.program_id || ''}" target="_blank" style="color:#4ade80;">Explorer ↗</a></span>
+                        <span style="color:#888;">Fee payer:</span>
+                        <span style="font-family:monospace;font-size:9px;color:#999;word-break:break-all;">${vd.fee_payer || 'desconocido'}</span>
+                        <span style="color:#888;">Instrucciones:</span>
+                        <span style="color:#ccc;">${vd.instr_count || '?'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
         el.innerHTML = `
             <div class="ns-header">
                 <span class="ns-badge ${step.badge}">${step.badgeLabel}</span>
@@ -968,6 +993,7 @@ function renderNarrative(steps) {
                 <span class="ns-title">Paso ${step.stepNum} · ${step.title}</span>
             </div>
             <div class="ns-desc">${step.desc}</div>
+            ${forensicsHtml}
             ${subsHtml}
         `;
 
@@ -998,6 +1024,69 @@ function renderNarrative(steps) {
 
         list.appendChild(el);
     }
+
+    // Add report section at the bottom
+    const sourceAddr = document.getElementById('search-input').value.trim();
+    const vuln = window._vulnerability;
+    const drain = window._drainInfo;
+    if (sourceAddr && (vuln || drain)) {
+        const rep = document.createElement('div');
+        rep.style.cssText = 'padding:12px 16px;border-top:2px solid rgba(233,69,96,0.2);margin-top:4px;';
+        rep.innerHTML = `
+            <div style="font-size:10px;color:#e94560;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">🚨 Generar Reporte</div>
+            <div style="font-size:9px;color:#888;margin-bottom:8px;line-height:1.5;">
+                Compila toda la evidencia para reportar el ataque a las autoridades y plataformas de seguridad.
+            </div>
+            <input type="text" id="phishing-url" placeholder="URL de phishing (opcional)" style="width:100%;background:#0d0d22;border:1px solid #2a2a4e;color:#fff;padding:6px 8px;border-radius:5px;font-size:10px;margin-bottom:6px;font-family:monospace;">
+            <button onclick="generarReporte()" style="background:linear-gradient(135deg,#e94560,#ff6b6b);color:#fff;border:none;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:10px;font-weight:600;width:100%;box-shadow:0 2px 10px rgba(233,69,96,0.3);">📄 Generar Reporte</button>
+            <div id="report-output" style="margin-top:6px;display:none;"></div>
+        `;
+        list.appendChild(rep);
+    }
+}
+
+function generarReporte() {
+    const addr = document.getElementById('search-input').value.trim();
+    const vuln = window._vulnerability;
+    const drain = window._drainInfo;
+    const phishingUrl = document.getElementById('phishing-url').value.trim();
+    const knownWallets = Object.entries(KNOWN).filter(([a,k]) => k.group === 'target').map(([a,k]) => `  • ${k.label}: ${a}`).join('\n');
+    const out = document.getElementById('report-output');
+
+    let report = '=== REPORTE DE SEGURIDAD - SOLANA WALLET TRACER ===\n';
+    report += `Fecha del reporte: ${new Date().toISOString().slice(0, 10)}\n\n`;
+    report += `--- Wallet comprometida ---\n`;
+    report += `Dirección: ${addr}\n`;
+    if (phishingUrl) report += `Sitio phishing: ${phishingUrl}\n`;
+    report += '\n';
+    if (vuln) {
+        report += `--- Transacción de FALLO (vulnerabilidad) ---\n`;
+        report += `Firma: ${vuln.sig}\n`;
+        report += `Fecha: ${vuln.time || 'desconocida'}\n`;
+        if (vuln.program_id) report += `Programa malicioso: ${vuln.program_id}\n`;
+        if (vuln.fee_payer) report += `Fee payer: ${vuln.fee_payer}\n`;
+        report += `Ver en Solscan: https://solscan.io/tx/${vuln.sig}\n`;
+        report += '\n';
+    }
+    if (drain) {
+        report += `--- Transacción de DRENAJE ---\n`;
+        report += `SOL perdidos: ${drain.lost} SOL (${(drain.lost/drain.balance_before*100).toFixed(0)}% del saldo)\n`;
+        report += `Saldo antes: ${drain.balance_before} SOL → Después: ${drain.balance_after} SOL\n`;
+        report += '\n';
+    }
+    report += `--- Flujo de fondos ---\n`;
+    report += `Total wallets identificadas: ${allNodes.length}\n`;
+    report += `Total transferencias: ${allTransfers.length}\n`;
+    report += `Wallets conocidas:\n${knownWallets || '  (ninguna)'}\n\n`;
+    report += `--- Enlaces para reportar ---\n`;
+    report += `• Google Safe Browsing: https://safebrowsing.google.com/safebrowsing/report_phish/\n`;
+    report += `• IC3 (FBI): https://www.ic3.gov/\n`;
+    report += `• Solana validator alert: reportar en https://discord.gg/solana\n`;
+
+    const safeReport = report.replace(/`/g, "'").replace(/\\/g, "\\\\").replace(/\$/g, "\\$");
+    out.innerHTML = `<textarea readonly style="width:100%;height:180px;background:#0d0d22;border:1px solid #2a2a4e;color:#ccc;padding:8px;border-radius:5px;font-size:9px;font-family:monospace;resize:vertical;">${report}</textarea>
+        <button onclick="var t=this.parentElement.querySelector('textarea');navigator.clipboard.writeText(t.value).then(function(){t.textContent='✓ Copiado'});" style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.25);color:#4ade80;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px;margin-top:4px;">📋 Copiar reporte</button>`;
+    out.style.display = 'block';
 }
 
 function populateTxList() { buildNarrative(); }

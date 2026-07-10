@@ -374,15 +374,29 @@ def api_trace_from_tx():
                                 prog = prog.get('pubkey', '')
                             if prog not in COMMON_PROGRAMS:
                                 is_suspicious = True
+                                malicious_prog = prog
+                                inst_data = instr.get('data', '')[:32]
                                 break
                     if is_suspicious:
                         b_time = b_tx.get('blockTime', 0)
                         b_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(b_time)) if b_time else ''
+                        # Extract fee payer and dApp info
+                        fee_payer = ''
+                        dapp_hint = ''
+                        if len(accts) > 0:
+                            first = accts[0]
+                            fee_payer = first.get('pubkey', first) if isinstance(first, dict) else first
+                        # Check for known phishing patterns in account keys
+                        acct_strs = [str(a) for a in accts[:8]]
                         vulnerability_info = {
                             'sig': b_sig,
                             'sig_short': b_sig[:13],
                             'time': b_time_str,
                             'blockTime': b_time,
+                            'program_id': malicious_prog,
+                            'fee_payer': fee_payer,
+                            'instr_count': len(msg.get('instructions', [])),
+                            'instr_data': inst_data,
                         }
                         break
         except RateLimitError:
