@@ -821,6 +821,20 @@ function buildNarrative() {
         }
     }
 
+    // Inject synthetic FALLO step if vulnerability exists but wasn't in transfers
+    if (window._vulnerability && !steps.some(s => s.badgeLabel === 'FALLO')) {
+        const v = window._vulnerability;
+        steps.unshift({
+            stepNum: 0,
+            day: (v.time || '').split(' ')[0],
+            timeLabel: (v.time || '').slice(11, 16),
+            badge: 'vulnerability', badgeLabel: 'FALLO',
+            title: 'FALLO: aprobación de programa malicioso',
+            desc: 'El usuario aprobó un programa desconocido que permitió al atacante drenar la wallet. Esta transacción otorgó los permisos para el robo.',
+            highlight: null, subs: []
+        });
+    }
+
     // Insert DRENADO step after FALLO (or at start if no FALLO)
     if (drainStep) {
         const falloIdx = steps.findIndex(s => s.badgeLabel === 'FALLO');
