@@ -1248,11 +1248,35 @@ function generarReporte() {
     const safeReport = report.replace(/`/g, "'").replace(/\\/g, "\\\\").replace(/\$/g, "\\$");
     out.innerHTML = `<textarea readonly style="width:100%;height:200px;background:#0d0d22;border:1px solid #2a2a4e;color:#ccc;padding:8px;border-radius:5px;font-size:11px;font-family:monospace;resize:vertical;line-height:1.3;">${report}</textarea>
         <div style="display:flex;gap:4px;margin-top:4px;">
+            <button onclick="generarPDF()" style="flex:1;background:rgba(233,69,96,0.12);border:1px solid rgba(233,69,96,0.25);color:#e94560;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">📄 PDF</button>
             <button onclick="var t=this.parentElement.parentElement.querySelector('textarea');navigator.clipboard.writeText(t.value).then(function(){this.textContent='✓ Copiado'}.bind(this));" style="flex:1;background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.25);color:#4ade80;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">📋 Copiar</button>
-            <button onclick="window.open('https://safebrowsing.google.com/safebrowsing/report_phish/','_blank')" style="flex:1;background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.25);color:#60a5fa;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">🛡️ Reportar phishing</button>
-            <button onclick="window.open('https://www.ic3.gov/','_blank')" style="flex:1;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.25);color:#ff6b6b;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">🏛️ IC3 (FBI)</button>
+            <button onclick="window.open('https://safebrowsing.google.com/safebrowsing/report_phish/','_blank')" style="flex:1;background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.25);color:#60a5fa;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">🛡️ Phishing</button>
+            <button onclick="window.open('https://www.ic3.gov/','_blank')" style="flex:1;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.25);color:#ff6b6b;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px;">🏛️ IC3</button>
         </div>`;
     out.style.display = 'block';
+}
+
+function generarPDF() {
+    const out = document.getElementById('report-output');
+    const textarea = out.querySelector('textarea');
+    if (!textarea) return;
+    const content = textarea.value;
+
+    const safeContent = content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reporte de Seguridad - Solana</title>' +
+'<style>' +
+    '@page { margin: 20mm 15mm; }' +
+    'body { font-family: "Courier New", monospace; font-size: 10px; color: #111; line-height: 1.5; background: #fff; padding: 0; margin: 0; }' +
+    'pre { white-space: pre-wrap; word-wrap: break-word; font-family: "Courier New", monospace; font-size: 10px; line-height: 1.5; margin: 0; }' +
+    'hr { border: none; border-top: 1px solid #ccc; margin: 8px 0; }' +
+'</style></head><body><pre>' + safeContent + '</pre>' +
+'<script>window.onload = function(){ window.print(); }<' + '/script>' +
+'</body></html>';
+
+    const win = window.open('', '_blank', 'width=800,height=600,menubar=yes,toolbar=yes');
+    if (!win) { alert('Permite las ventanas emergentes para generar el PDF.'); return; }
+    win.document.write(html);
+    win.document.close();
 }
 
 function populateTxList() { buildNarrative(); }
