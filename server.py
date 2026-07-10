@@ -435,7 +435,9 @@ def _save_config(cfg):
 def api_get_helius_key():
     cfg = _load_config()
     key = cfg.get('helius_key', '')
-    return jsonify({'key': key[:8] + '...' if len(key) > 8 else key})
+    # Show masked preview; include unmasked key so frontend can pre-fill
+    preview = key[:8] + '...' if len(key) > 8 else (key or '')
+    return jsonify({'key': key, 'preview': preview})
 
 @app.route('/api/helius-key', methods=['POST'])
 def api_set_helius_key():
@@ -464,13 +466,20 @@ def api_debug_rpc():
     key = os.environ.get('HELIUS_API_KEY', '')
     return jsonify({'has_key': bool(key), 'key_preview': key[:8]+'..' if key else 'none', 'endpoints': results})
 
+DEFAULT_HELIUS_KEY = 'a6bb8dd1-5315-4b04-8223-b0dff0badb13'
+
 if __name__ == '__main__':
     init_db()
     os.makedirs(DATA_DIR, exist_ok=True)
-    # Load Helius key from config
+    # Load Helius key from config (or use default)
     cfg = _load_config()
-    if cfg.get('helius_key'):
-        os.environ['HELIUS_API_KEY'] = cfg['helius_key']
+    key = cfg.get('helius_key', '') or DEFAULT_HELIUS_KEY
+    if key:
+        os.environ['HELIUS_API_KEY'] = key
+    # Save default key to config if not set
+    if not cfg.get('helius_key'):
+        cfg['helius_key'] = DEFAULT_HELIUS_KEY
+        _save_config(cfg)
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_ENV') == 'development'
     host = os.environ.get('HOST', '0.0.0.0')
