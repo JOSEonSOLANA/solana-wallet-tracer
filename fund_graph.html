@@ -422,12 +422,6 @@
             <button onclick="searchWallet()" style="background:#e94560;color:#fff;border:none;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">Buscar</button>
         </div>
         <div style="display:flex;gap:4px;margin-top:4px;">
-            <select id="hops-select" style="flex:1;background:#1a1a3e;border:1px solid #333;color:#aaa;padding:4px 6px;border-radius:4px;font-size:10px;">
-                <option value="0">Solo esta tx</option>
-                <option value="1">1 nivel</option>
-                <option value="2" selected>2 niveles</option>
-                <option value="3">3 niveles</option>
-            </select>
             <button onclick="loadFromHistory()" style="background:transparent;border:1px solid #333;color:#888;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:10px;" id="btn-load-hist" disabled>Cargar</button>
         </div>
         <div id="search-status" style="font-size:10px;color:#666;min-height:16px;"></div>
@@ -1089,12 +1083,10 @@ function traceFromTx(address, sig) {
     const status = document.getElementById('search-status');
     status.innerHTML = '<span class="spinner"></span> Rastreando desde esta transacción...';
 
-    const depth = parseInt(document.getElementById('hops-select').value) || 2;
-
     fetch('/api/trace-from-tx', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({sig: sig, address: address, depth: depth})
+        body: JSON.stringify({sig: sig, address: address, depth: 3})
     })
     .then(r => {
         if (!r.ok) return r.text().then(t => { throw new Error(r.status + ' ' + t.slice(0,100)); });
