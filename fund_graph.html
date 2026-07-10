@@ -468,10 +468,17 @@
             <button class="sec" onclick="toggleParticles()" id="btn-anim">⏸ Pausar</button>
             <button class="sec" onclick="toggleLabels()" id="btn-labels">Ocultar etiquetas</button>
         </div>
-        <div style="font-size:10px;color:#444;margin-top:auto;padding-top:12px;">
+        <div style="font-size:10px;color:#444;padding-top:12px;">
             Click nodo → centra &amp; info abajo<br>
             Arrastra → mueve nodo<br>
             Scroll → zoom
+        </div>
+
+        <div class="section-title" style="margin-top:12px;">Pasos</div>
+        <div style="font-size:9px;color:#888;line-height:1.6;padding:0 2px;">
+            <div>1. Pegar API key de Helius</div>
+            <div>2. Pulsar OK</div>
+            <div>3. Buscar wallet drenada</div>
         </div>
     </div>
 
@@ -532,8 +539,9 @@ function saveHeliusKey() {
     .then(r => r.json())
     .then(data => {
         document.getElementById('rpc-status').innerHTML = key ?
-            '<span style="color:#4ade80;">Guardado. Reinicia el servidor para aplicar.</span>' :
-            '<span style="color:#ffd93d;">Key eliminada</span>';
+            '<span style="color:#4ade80;">Guardado, recargando...</span>' :
+            '<span style="color:#ffd93d;">Key eliminada, recargando...</span>';
+        setTimeout(() => location.reload(), 500);
     })
     .catch(err => {
         document.getElementById('rpc-status').innerHTML = '<span style="color:#e94560;">Error: ' + err.message + '</span>';
