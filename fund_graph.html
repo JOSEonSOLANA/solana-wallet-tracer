@@ -435,9 +435,11 @@
         <div class="section-title">RPC (Helius API Key)</div>
         <div style="display:flex;gap:4px;">
             <input type="text" id="helius-key" placeholder="API key de Helius (gratis)..." style="flex:1;background:#1a1a3e;border:1px solid #333;color:#fff;padding:5px 8px;border-radius:4px;font-size:10px;font-family:monospace;">
-            <button onclick="saveHeliusKey()" style="background:#1a1a3e;border:1px solid #333;color:#4ade80;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:10px;">OK</button>
+            <button onclick="saveHeliusKey()" id="helius-ok-btn" style="background:#1a1a3e;border:1px solid #333;color:#4ade80;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:10px;">OK</button>
+            <button onclick="clearHeliusKey()" title="Limpiar API key" style="background:transparent;border:1px solid #e94560;color:#e94560;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:10px;">✕</button>
         </div>
         <div id="rpc-status" style="font-size:9px;color:#555;min-height:14px;margin-top:2px;"></div>
+        <div id="rpc-warning" style="font-size:9px;min-height:0;margin-top:2px;transition:all 0.3s;"></div>
 
         <div class="section-title">Historial</div>
         <div id="history-list" style="font-size:10px;max-height:120px;overflow-y:auto;">
@@ -516,12 +518,22 @@ function init() {
 }
 
 function loadHeliusKey() {
+    const localKey = localStorage.getItem('helius_key') || '';
+    if (localKey) {
+        document.getElementById('helius-key').value = localKey;
+        fetch('/api/helius-key', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: localKey})
+        }).catch(() => {});
+        document.getElementById('rpc-status').innerHTML = '<span style="color:#4ade80;">Helius activo</span>';
+        return;
+    }
     fetch('/api/helius-key')
         .then(r => r.json())
         .then(data => {
             if (data.key) {
-                document.getElementById('helius-key').value = data.key;
-                document.getElementById('rpc-status').innerHTML = '<span style="color:#4ade80;">Helius activo</span>';
+                document.getElementById('rpc-status').innerHTML = '<span style="color:#4ade80;">Helius: ' + data.key + '</span>';
             } else {
                 document.getElementById('rpc-status').innerHTML = '<span style="color:#ffd93d;">Sin API key — datos limitados</span>';
             }
@@ -529,8 +541,28 @@ function loadHeliusKey() {
         .catch(() => {});
 }
 
-function saveHeliusKey() {
+// Auto-save on input with debounce
+let _heliusTimer = null;
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('helius-key');
+    if (input) {
+        input.addEventListener('input', () => {
+            clearTimeout(_heliusTimer);
+            _heliusTimer = setTimeout(() => {
+                saveHeliusKey(true);
+            }, 600);
+        });
+    }
+});
+
+function saveHeliusKey(silent) {
     const key = document.getElementById('helius-key').value.trim();
+    // Save to localStorage immediately
+    if (key) {
+        localStorage.setItem('helius_key', key);
+    } else {
+        localStorage.removeItem('helius_key');
+    }
     fetch('/api/helius-key', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -538,6 +570,12 @@ function saveHeliusKey() {
     })
     .then(r => r.json())
     .then(data => {
+        if (silent) {
+            document.getElementById('rpc-status').innerHTML = key ?
+                '<span style="color:#4ade80;">✔ Helius activo</span>' :
+                '<span style="color:#ffd93d;">Sin API key</span>';
+            return;
+        }
         document.getElementById('rpc-status').innerHTML = key ?
             '<span style="color:#4ade80;">Guardado, recargando...</span>' :
             '<span style="color:#ffd93d;">Key eliminada, recargando...</span>';
@@ -546,6 +584,20 @@ function saveHeliusKey() {
     .catch(err => {
         document.getElementById('rpc-status').innerHTML = '<span style="color:#e94560;">Error: ' + err.message + '</span>';
     });
+}
+
+function clearHeliusKey() {
+    document.getElementById('helius-key').value = '';
+    localStorage.removeItem('helius_key');
+    saveHeliusKey();
+}
+
+function showRateLimitWarning() {
+    const warn = document.getElementById('rpc-warning');
+    warn.innerHTML = '<span style="color:#ff6b6b;">⚠ Límite de API key alcanzado. <a href="#" onclick="document.getElementById(\'helius-key\').focus();return false;" style="color:#4ade80;">Añade otra key</a> o espera 1 min.</span>';
+    warn.style.minHeight = '16px';
+    const st = document.getElementById('search-status');
+    if (st) st.innerHTML = '<span style="color:#ff6b6b;">Límite de API key — </span><a href="https://dashboard.helius.dev/api-keys" target="_blank" style="color:#4ade80;font-size:10px;">Consigue otra key</a>';
 }
 
 function processData(data) {
@@ -947,6 +999,10 @@ function searchWallet() {
             return r.json();
         })
         .then(data => {
+            if (data.rate_limited) {
+                showRateLimitWarning();
+                return;
+            }
             const txs = data.txs || data;
             if (txs.length === 0) {
                 status.innerHTML = '<span style="color:#ffd93d;">Sin transacciones — </span><a href="https://dashboard.helius.dev/api-keys" target="_blank" style="color:#4ade80;font-size:10px;">Añade API key de Helius</a>';
@@ -1046,6 +1102,7 @@ function traceFromTx(address, sig) {
     .then(data => {
         if (data.error) {
             status.innerHTML = '<span style="color:#e94560;">Error: ' + data.error + '</span>';
+            if (data.rate_limited) showRateLimitWarning();
             return;
         }
         if (data.wallets.length === 0 && data.transfers.length === 0) {
@@ -1053,6 +1110,9 @@ function traceFromTx(address, sig) {
             return;
         }
         status.innerHTML = '<span style="color:#4ade80;">' + data.wallets.length + ' wallets, ' + data.transfers.length + ' movimientos</span>';
+        // Clear any previous rate limit warning
+        document.getElementById('rpc-warning').innerHTML = '';
+        document.getElementById('rpc-warning').style.minHeight = '0';
         processData({wallets: data.wallets, transfers: data.transfers, is_drain: data.is_drain, drain_info: data.drain_info, vulnerability: data.vulnerability, source_address: address});
     })
     .catch(err => {

@@ -19,6 +19,9 @@ def _get_rpc_endpoints():
         return [f'https://mainnet.helius-rpc.com/?api-key={key}'] + BASE_RPC_ENDPOINTS
     return BASE_RPC_ENDPOINTS
 
+class RateLimitError(Exception):
+    pass
+
 def _rpc_call(method, params, endpoint=None):
     endpoints = [endpoint] if endpoint else _get_rpc_endpoints()
     last_err = None
@@ -26,13 +29,24 @@ def _rpc_call(method, params, endpoint=None):
         try:
             data = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}).encode()
             req = urllib.request.Request(ep, data, {'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read())
-                if result is None:
-                    raise Exception('RPC returned null')
-                if 'error' in result:
-                    raise Exception(result['error'])
-                return result['result']
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    raise RateLimitError('Rate limited (429)')
+                raise
+            if result is None:
+                raise Exception('RPC returned null')
+            if 'error' in result:
+                err = result['error']
+                err_str = str(err).lower()
+                if 'rate limit' in err_str or 'too many requests' in err_str or '429' in err_str:
+                    raise RateLimitError(str(err))
+                raise Exception(err)
+            return result['result']
+        except RateLimitError:
+            raise
         except Exception as e:
             last_err = e
             time.sleep(0.1)

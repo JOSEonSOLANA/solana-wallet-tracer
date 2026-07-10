@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, request, jsonify, send_from_directory
 
 from database import init_db, save_trace, get_trace, get_all_traces, delete_trace, save_known_wallet, get_known_wallets, delete_known_wallet
-from tracer import trace_wallet, analyze_trace, get_signatures, get_transaction, parse_transfers
+from tracer import trace_wallet, analyze_trace, get_signatures, get_transaction, parse_transfers, RateLimitError
 
 rpc_executor = ThreadPoolExecutor(max_workers=10)
 
@@ -128,7 +128,10 @@ def api_transactions(address):
     drain_idx = -1
     for i, s_info in enumerate(sigs[:20]):  # check 20 newest
         sig = s_info.get('signature', '')
-        tx = get_transaction(sig)
+        try:
+            tx = get_transaction(sig)
+        except RateLimitError:
+            return jsonify({'txs': [], 'drain_sig': None, 'rate_limited': True, 'error': 'Límite de API key alcanzado. Añade otra key de Helius.'})
         if not tx:
             continue
         meta = tx.get('meta', {})
@@ -229,7 +232,10 @@ def api_trace_from_tx():
     if not sig:
         return jsonify({'error': 'Signature required'}), 400
 
-    tx = get_transaction(sig)
+    try:
+        tx = get_transaction(sig)
+    except RateLimitError:
+        return jsonify({'error': 'Límite de API key alcanzado. Añade otra key de Helius.', 'rate_limited': True}), 429
     if not tx:
         return jsonify({'error': 'Transaction not found'}), 404
 
@@ -281,6 +287,8 @@ def api_trace_from_tx():
                     if nsig not in visited_sigs:
                         pending_sigs.append(nsig)
                         visited_sigs.add(nsig)
+            except RateLimitError:
+                raise
             except Exception:
                 pass
 
@@ -310,6 +318,8 @@ def api_trace_from_tx():
                             if nsig not in visited_sigs:
                                 level2_sigs.append(nsig)
                                 visited_sigs.add(nsig)
+                    except RateLimitError:
+                        raise
                     except Exception:
                         pass
 
@@ -371,6 +381,8 @@ def api_trace_from_tx():
                             'blockTime': b_time,
                         }
                         break
+        except RateLimitError:
+            raise
         except Exception:
             pass
 
