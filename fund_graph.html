@@ -920,7 +920,10 @@ function searchWallet() {
     window._autoTraced = false;
 
     fetch('/api/transactions/' + encodeURIComponent(addr))
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(r.status + ' ' + t.slice(0,100)); });
+            return r.json();
+        })
         .then(data => {
             const txs = data.txs || data;
             if (txs.length === 0) {
@@ -1014,7 +1017,10 @@ function traceFromTx(address, sig) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({sig: sig, address: address, depth: depth})
     })
-    .then(r => r.json())
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(r.status + ' ' + t.slice(0,100)); });
+        return r.json();
+    })
     .then(data => {
         if (data.error) {
             status.innerHTML = '<span style="color:#e94560;">Error: ' + data.error + '</span>';
