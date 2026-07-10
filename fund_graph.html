@@ -1092,10 +1092,14 @@ function traceFromTx(address, sig) {
     const status = document.getElementById('search-status');
     status.innerHTML = '<span class="spinner"></span> Rastreando desde esta transacción...';
 
+    // Pass before-drain sigs so server doesn't need to re-fetch
+    const txs = (window._txListData || {}).transactions || [];
+    const beforeSigs = txs.filter(t => t.phase === 'before').map(t => t.sig);
+
     fetch('/api/trace-from-tx', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({sig: sig, address: address, depth: 3})
+        body: JSON.stringify({sig: sig, address: address, depth: 3, before_sigs: beforeSigs})
     })
     .then(r => {
         if (!r.ok) return r.text().then(t => { throw new Error(r.status + ' ' + t.slice(0,100)); });

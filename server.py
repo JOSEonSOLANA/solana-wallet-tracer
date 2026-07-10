@@ -335,15 +335,19 @@ def api_trace_from_tx():
     vulnerability_info = None
     if is_drain and address:
         try:
-            sigs = get_signatures(address, limit=50)
-            drain_idx = -1
-            for i, s_info in enumerate(sigs):
-                if s_info.get('signature') == sig:
-                    drain_idx = i
-                    break
+            # Use before_sigs from request if available, else re-fetch
+            before_sigs = data.get('before_sigs', None)
+            if not before_sigs:
+                sigs = get_signatures(address, limit=50)
+                drain_idx = -1
+                for i, s_info in enumerate(sigs):
+                    if s_info.get('signature') == sig:
+                        drain_idx = i
+                        break
+                if drain_idx >= 0:
+                    before_sigs = [s.get('signature', '') for s in sigs[drain_idx+1:drain_idx+6]]
 
-            if drain_idx >= 0:
-                before_sigs = sigs[drain_idx+1:drain_idx+6]
+            if before_sigs:
                 COMMON_PROGRAMS = [
                     '11111111111111111111111111111111',
                     'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -355,7 +359,7 @@ def api_trace_from_tx():
                     'So1endDv2NyzpJequhbzEf2NfCCfFST5qC2ExCrcQmD',
                 ]
                 for s_info in before_sigs:
-                    b_sig = s_info.get('signature', '')
+                    b_sig = s_info if isinstance(s_info, str) else s_info.get('signature', '')
                     b_tx = get_transaction(b_sig)
                     if not b_tx:
                         continue
