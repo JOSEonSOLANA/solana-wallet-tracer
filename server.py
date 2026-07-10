@@ -358,6 +358,8 @@ def api_trace_from_tx():
                     'KeccakSecp256k11111111111111111111111111111',
                     'So1endDv2NyzpJequhbzEf2NfCCfFST5qC2ExCrcQmD',
                 ]
+                TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+
                 for s_info in before_sigs:
                     b_sig = s_info if isinstance(s_info, str) else s_info.get('signature', '')
                     b_tx = get_transaction(b_sig)
@@ -365,29 +367,127 @@ def api_trace_from_tx():
                         continue
                     msg = b_tx.get('transaction', {}).get('message', {})
                     accts = msg.get('accountKeys', [])
+                    # Resolve account keys to pubkey strings
+                    acct_pubkeys = []
+                    for a in accts:
+                        if isinstance(a, dict):
+                            acct_pubkeys.append(a.get('pubkey', ''))
+                        else:
+                            acct_pubkeys.append(str(a))
+
                     is_suspicious = False
+                    malicious_prog = ''
+                    permissions_granted = []
+                    bot_detected = False
+                    instr_details = []
+
                     for instr in msg.get('instructions', []):
                         prog_idx = instr.get('programIdIndex', -1)
-                        if 0 <= prog_idx < len(accts):
-                            prog = accts[prog_idx]
-                            if isinstance(prog, dict):
-                                prog = prog.get('pubkey', '')
+                        accounts_idx = instr.get('accounts', [])
+                        raw_data = instr.get('data', '')
+                        if 0 <= prog_idx < len(acct_pubkeys):
+                            prog = acct_pubkeys[prog_idx]
                             if prog not in COMMON_PROGRAMS:
                                 is_suspicious = True
                                 malicious_prog = prog
-                                inst_data = instr.get('data', '')[:32]
-                                break
+                                # Decode instruction type
+                                # Try to get instruction index from data
+                                if raw_data:
+                                    try:
+                                        first_byte = int(raw_data[:2], 16) if len(raw_data) >= 2 else -1
+                                    except ValueError:
+                                        first_byte = -1
+                                else:
+                                    first_byte = -1
+
+                                # Resolve involved account keys
+                                involved_accts = []
+                                for ai in accounts_idx:
+                                    if ai < len(acct_pubkeys):
+                                        involved_accts.append(acct_pubkeys[ai])
+
+                                if prog == TOKEN_PROGRAM:
+                                    if first_byte == 0x07:
+                                        delegate = involved_accts[3] if len(involved_accts) > 3 else 'desconocida'
+                                        permissions_granted.append(f'Approve (delegación de tokens): se otorgó permiso a {delegate} para gastar tokens')
+                                    elif first_byte == 0x04:
+                                        permissions_granted.append(f'Transfer: se transfirieron tokens directamente desde la wallet')
+                                    elif first_byte == 0x0A:
+                                        permissions_granted.append(f'SetAuthority: se cambió la autoridad de una cuenta de tokens')
+                                    elif first_byte == 0x0D:
+                                        permissions_granted.append(f'Burn: se quemaron tokens')
+                                    elif first_byte == 0x0B:
+                                        permissions_granted.append(f'MintTo: se acuñaron nuevos tokens')
+                                    else:
+                                        permissions_granted.append(f'Instrucción Token 0x{first_byte:02x}: operación desconocida sobre tokens')
+                                else:
+                                    # Unknown program — any instruction is suspicious
+                                    permissions_granted.append(f'Programa desconocido ({prog[:8]}..): se ejecutó instrucción con {len(involved_accts)} cuentas')
+
+                                instr_details.append({
+                                    'program_id': prog,
+                                    'first_byte': first_byte,
+                                    'account_count': len(accounts_idx),
+                                })
+                            elif prog == TOKEN_PROGRAM and raw_data:
+                                # Even common program can have suspicious instructions
+                                try:
+                                    first_byte = int(raw_data[:2], 16) if len(raw_data) >= 2 else -1
+                                except ValueError:
+                                    first_byte = -1
+                                accounts_idx = instr.get('accounts', [])
+                                involved_accts = []
+                                for ai in accounts_idx:
+                                    if ai < len(acct_pubkeys):
+                                        involved_accts.append(acct_pubkeys[ai])
+                                if first_byte == 0x07 and len(involved_accts) > 3:
+                                    delegate = involved_accts[3]
+                                    # Check if delegate is not a known safe address
+                                    if delegate not in ['11111111111111111111111111111111']:
+                                        permissions_granted.append(f'Approve (delegación): se autorizó a {delegate} a gastar tokens')
+                                        instr_details.append({
+                                            'program_id': prog,
+                                            'first_byte': first_byte,
+                                            'account_count': len(accounts_idx),
+                                            'delegate': delegate,
+                                        })
+
                     if is_suspicious:
                         b_time = b_tx.get('blockTime', 0)
                         b_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(b_time)) if b_time else ''
                         # Extract fee payer and dApp info
-                        fee_payer = ''
-                        dapp_hint = ''
-                        if len(accts) > 0:
-                            first = accts[0]
-                            fee_payer = first.get('pubkey', first) if isinstance(first, dict) else first
-                        # Check for known phishing patterns in account keys
-                        acct_strs = [str(a) for a in accts[:8]]
+                        fee_payer = acct_pubkeys[0] if acct_pubkeys else ''
+                        total_instr = len(msg.get('instructions', []))
+                        suspicious_instr_count = len(instr_details)
+
+                        # Detect if a drain bot was likely set up
+                        # Criteria: multiple suspicious instructions + token approvals to external accts
+                        has_approve = any(d.get('first_byte') == 0x07 for d in instr_details)
+                        has_multi_instr = suspicious_instr_count >= 2
+                        has_unknown_prog = malicious_prog and malicious_prog not in [TOKEN_PROGRAM, *COMMON_PROGRAMS]
+                        bot_detected = has_unknown_prog or (has_approve and total_instr >= 3)
+
+                        # Detect if keys were likely stolen
+                        # In Solana, you can't extract private keys from a single tx approval
+                        # But the victim often signs multiple tx (connect + approve), which means
+                        # the dApp had full UI interaction — implying the seed phrase was likely
+                        # phished via a fake wallet connect flow
+                        keys_compromised = bool(has_unknown_prog)
+
+                        # Safety assessment
+                        if bot_detected and keys_compromised:
+                            safety = 'peligro'
+                            safety_msg = 'NO USAR ESTA WALLET. Se detectó un programa malicioso que puede tener acceso total. Crea una wallet nueva y transfiere cualquier fondo restante inmediatamente.'
+                        elif bot_detected:
+                            safety = 'alto_riesgo'
+                            safety_msg = 'NO USAR ESTA WALLET. Se detectó actividad automatizada de drenaje. La wallet fue comprometida a nivel de programa.'
+                        elif has_approve:
+                            safety = 'riesgo'
+                            safety_msg = 'Se otorgaron delegaciones de tokens. Revoca todas las aprobaciones con Solana CLI o https://spl-token-ui.vercel.app/. Si no hay fondos, la wallet podría ser segura tras revocar.'
+                        else:
+                            safety = 'precaución'
+                            safety_msg = 'Se detectó actividad inusual antes del drenaje. Aunque no se confirmaron programas maliciosos, se recomienda no reutilizar esta wallet.'
+
                         vulnerability_info = {
                             'sig': b_sig,
                             'sig_short': b_sig[:13],
@@ -395,8 +495,15 @@ def api_trace_from_tx():
                             'blockTime': b_time,
                             'program_id': malicious_prog,
                             'fee_payer': fee_payer,
-                            'instr_count': len(msg.get('instructions', [])),
-                            'instr_data': inst_data,
+                            'instr_count': total_instr,
+                            'instr_data': '',
+                            'permissions_granted': permissions_granted,
+                            'bot_detected': bot_detected,
+                            'keys_compromised': keys_compromised,
+                            'instr_details': instr_details,
+                            'safety': safety,
+                            'safety_msg': safety_msg,
+                            'detected_at': time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime()),
                         }
                         break
         except RateLimitError:
