@@ -28,6 +28,8 @@ def _rpc_call(method, params, endpoint=None):
             req = urllib.request.Request(ep, data, {'Content-Type': 'application/json'})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 result = json.loads(resp.read())
+                if result is None:
+                    raise Exception('RPC returned null')
                 if 'error' in result:
                     raise Exception(result['error'])
                 return result['result']

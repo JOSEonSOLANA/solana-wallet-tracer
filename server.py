@@ -436,6 +436,22 @@ def api_set_helius_key():
     os.environ['HELIUS_API_KEY'] = key
     return jsonify({'status': 'saved'})
 
+@app.route('/api/debug-rpc')
+def api_debug_rpc():
+    """Debug endpoint to test RPC connectivity."""
+    import tracer as t
+    sig = '5NyCxwh5uNj7sVufVpQZ4ZdNzj4ZUKs4P85QHMSBS2xXR3axhxsYCPJCUxXBZeA7vQntHLZLEJ1XG59G6c6EHqGx'
+    results = {}
+    # Test each RPC endpoint individually
+    for ep in t._get_rpc_endpoints():
+        try:
+            t._rpc_call('getTransaction', [sig, {'encoding': 'json', 'maxSupportedTransactionVersion': 0}], endpoint=ep)
+            results[ep[:40]] = 'OK'
+        except Exception as e:
+            results[ep[:40]] = str(e)[:100]
+    key = os.environ.get('HELIUS_API_KEY', '')
+    return jsonify({'has_key': bool(key), 'key_preview': key[:8]+'..' if key else 'none', 'endpoints': results})
+
 if __name__ == '__main__':
     init_db()
     os.makedirs(DATA_DIR, exist_ok=True)
