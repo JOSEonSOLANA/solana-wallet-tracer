@@ -1081,11 +1081,11 @@ function generarReporte() {
     // Build total SOL lost and collector info
     let totalSolLost = 0;
     let collectorAddr = '';
+    for (const t of allTransfers) {
+        if (t.unit === 'SOL' && typeof t.amount === 'number') totalSolLost += t.amount;
+    }
     for (const [a, k] of Object.entries(KNOWN)) {
-        if (k.group === 'target') {
-            totalSolLost += k.total_received || 0;
-            collectorAddr = a;
-        }
+        if (k.group === 'target') collectorAddr = a;
     }
 
     // Build timeline
@@ -1183,7 +1183,12 @@ function generarReporte() {
     report += '─' .repeat(70) + '\n';
     report += `  Total wallets:     ${allNodes.length}\n`;
     report += `  Total transfers:   ${allTransfers.length}\n`;
-    report += `  SOL total perdido: ~${totalSolLost.toFixed(6)} SOL\n\n`;
+    if (totalSolLost > 0) report += `  SOL total movido:  ${totalSolLost.toFixed(6)} SOL\n`;
+    const solTransfers = allTransfers.filter(t => t.unit === 'SOL');
+    const tokTransfers = allTransfers.filter(t => t.unit !== 'SOL');
+    if (solTransfers.length > 0) report += `  Transferencias SOL: ${solTransfers.length}\n`;
+    if (tokTransfers.length > 0) report += `  Transferencias token: ${tokTransfers.length}\n`;
+    report += '\n';
 
     for (const g of ['target', 'intermediary', 'origin']) {
         if (knownByGroup[g] && knownByGroup[g].length > 0) {
@@ -1198,11 +1203,12 @@ function generarReporte() {
 
     // Add unknown wallets
     const knownAddrs = new Set(Object.keys(KNOWN));
-    const unknownAddrs = allNodes.filter(n => !knownAddrs.has(n)).slice(0, 10);
+    const unknownAddrs = allNodes.filter(n => !knownAddrs.has(n.id || n)).slice(0, 10);
     if (unknownAddrs.length > 0) {
         report += `  ❓ NO IDENTIFICADAS (${unknownAddrs.length} mostradas):\n`;
         for (const a of unknownAddrs) {
-            report += `    • ${a}\n      https://solscan.io/account/${a}\n`;
+            const addr = a.id || a;
+            report += `    • ${addr}\n      https://solscan.io/account/${addr}\n`;
         }
         report += '\n';
     }
