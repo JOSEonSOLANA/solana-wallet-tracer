@@ -260,7 +260,9 @@ def api_trace_from_tx():
                 post = post_bals[i] / 1e9
                 if pre > 0 and post < pre * 0.2:
                     is_drain = True
-                    drain_info = {'balance_before': round(pre, 6), 'balance_after': round(post, 6), 'lost': round(pre - post, 6)}
+                    b_time = tx.get('blockTime', 0)
+                    b_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(b_time)) if b_time else ''
+                    drain_info = {'balance_before': round(pre, 6), 'balance_after': round(post, 6), 'lost': round(pre - post, 6), 'sig': sig, 'sig_short': sig[:13], 'time': b_time_str}
                 break
 
     # Follow the flow: parallel multi-depth BFS

@@ -1067,42 +1067,185 @@ function generarReporte() {
     const vuln = window._vulnerability;
     const drain = window._drainInfo;
     const phishingUrl = document.getElementById('phishing-url').value.trim();
-    const knownWallets = Object.entries(KNOWN).filter(([a,k]) => k.group === 'target').map(([a,k]) => `  • ${k.label}: ${a}`).join('\n');
     const out = document.getElementById('report-output');
 
-    let report = '=== REPORTE DE SEGURIDAD - SOLANA WALLET TRACER ===\n';
-    report += `Fecha del reporte: ${new Date().toISOString().slice(0, 10)}\n\n`;
-    report += `--- Wallet comprometida ---\n`;
-    report += `Dirección: ${addr}\n`;
-    if (phishingUrl) report += `Sitio phishing: ${phishingUrl}\n`;
+    // Collect all known wallets by group
+    const knownByGroup = {};
+    const groupNames = { origin: '🐳 ORIGEN (víctima)', target: '🎯 COLECTOR (atacante)', intermediary: '🔄 INTERMEDIARIO' };
+    for (const [a, k] of Object.entries(KNOWN)) {
+        const g = k.group || 'intermediary';
+        if (!knownByGroup[g]) knownByGroup[g] = [];
+        knownByGroup[g].push({ addr: a, label: k.label });
+    }
+
+    // Build total SOL lost and collector info
+    let totalSolLost = 0;
+    let collectorAddr = '';
+    for (const [a, k] of Object.entries(KNOWN)) {
+        if (k.group === 'target') {
+            totalSolLost += k.total_received || 0;
+            collectorAddr = a;
+        }
+    }
+
+    // Build timeline
+    let timeline = '';
+    if (vuln) timeline += `  [1] FALLO (vulnerabilidad):   ${vuln.time} - ${vuln.sig_short}...\n`;
+    if (drain) timeline += `  [2] DRENAJE:                ${drain.time || ''} - ${drain.sig_short || ''}\n`;
+    timeline += `  [3] Flujo de fondos:       ${allTransfers.length} transferencias rastreadas\n`;
+
+    // Build permissions detail
+    let permsDetail = '';
+    if (vuln && vuln.permissions_granted && vuln.permissions_granted.length > 0) {
+        permsDetail = vuln.permissions_granted.map((p, i) => `  ${i+1}. ${p}`).join('\n');
+    }
+
+    // Risk level text
+    const riskTexts = {
+        peligro: '🔴 CRÍTICO',
+        alto_riesgo: '🟠 ALTO',
+        riesgo: '🟡 MEDIO',
+        precaución: '🔵 BAJO'
+    };
+
+    // Build the report
+    let report = '';
+    report += '╔══════════════════════════════════════════════════════════════╗\n';
+    report += '║       REPORTE DE SEGURIDAD — SOLANA WALLET TRACER         ║\n';
+    report += '╚══════════════════════════════════════════════════════════════╝\n';
+    report += `  Generado: ${new Date().toLocaleString('es-ES', { timeZone: 'UTC' })} UTC\n`;
+    report += `  URL: https://solana-wallet-tracer.onrender.com\n\n`;
+
+    report += '─' .repeat(70) + '\n';
+    report += '  1. INFORMACIÓN GENERAL\n';
+    report += '─' .repeat(70) + '\n';
+    report += `  Wallet comprometida:  ${addr}\n`;
+    if (phishingUrl) report += `  Sitio de phishing:     ${phishingUrl}\n`;
+    report += `  Nivel de riesgo:       ${riskTexts[vuln?.safety] || '⚠️ NO EVALUADO'}\n`;
     report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  2. RESUMEN DEL ATAQUE\n';
+    report += '─' .repeat(70) + '\n';
+    report += `  Tipo:  Aprovechamiento de permisos + drenaje automatizado\n`;
+    report += `  ${vuln?.bot_detected ? '🤖 Se detectó un BOT AUTOMÁTICO de drenaje' : ''}\n`;
+    report += `  ${vuln?.keys_compromised ? '🔑 Las claves privadas fueron probablemente extraídas' : ''}\n`;
+    report += `  Estados:\n${timeline}`;
+    report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  3. ANÁLISIS FORENSE — TRANSACCIÓN FALLO\n';
+    report += '─' .repeat(70) + '\n';
     if (vuln) {
-        report += `--- Transacción de FALLO (vulnerabilidad) ---\n`;
-        report += `Firma: ${vuln.sig}\n`;
-        report += `Fecha: ${vuln.time || 'desconocida'}\n`;
-        if (vuln.program_id) report += `Programa malicioso: ${vuln.program_id}\n`;
-        if (vuln.fee_payer) report += `Fee payer: ${vuln.fee_payer}\n`;
-        report += `Ver en Solscan: https://solscan.io/tx/${vuln.sig}\n`;
-        report += '\n';
+        report += `  Firma:         ${vuln.sig}\n`;
+        report += `  Fecha:         ${vuln.time || 'desconocida'}\n`;
+        report += `  Programa malicioso: ${vuln.program_id || 'desconocido'}\n`;
+        report += `  Fee payer:     ${vuln.fee_payer || 'desconocido'}\n`;
+        report += `  Instrucciones: ${vuln.instr_count || '0'} total · ${(vuln.instr_details||[]).length} sospechosas\n`;
+        report += `  Detectado:     ${vuln.detected_at || vuln.time || ''}\n`;
+        report += `  Solscan:       https://solscan.io/tx/${vuln.sig}\n`;
+        if (vuln.program_id) {
+            report += `  Programa:      https://solscan.io/account/${vuln.program_id}\n`;
+        }
+        if (permsDetail) {
+            report += `\n  Permisos otorgados:\n${permsDetail}\n`;
+        }
+    } else {
+        report += '  (No se pudo identificar la transacción de vulnerabilidad)\n';
     }
+    report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  4. EVALUACIÓN DE SEGURIDAD\n';
+    report += '─' .repeat(70) + '\n';
+    const safetyBadge = riskTexts[vuln?.safety] || '⚠️ NO EVALUADO';
+    report += `  Riesgo: ${safetyBadge}\n`;
+    report += `  Recomendación:\n  → ${vuln?.safety_msg || 'No se pudo determinar el nivel de riesgo. Se recomienda no reutilizar la wallet.'}\n`;
+    report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  5. TRANSACCIÓN DE DRENAJE\n';
+    report += '─' .repeat(70) + '\n';
     if (drain) {
-        report += `--- Transacción de DRENAJE ---\n`;
-        report += `SOL perdidos: ${drain.lost} SOL (${(drain.lost/drain.balance_before*100).toFixed(0)}% del saldo)\n`;
-        report += `Saldo antes: ${drain.balance_before} SOL → Después: ${drain.balance_after} SOL\n`;
+        const pct = drain.balance_before > 0 ? (drain.lost/drain.balance_before*100).toFixed(0) : 0;
+        report += `  SOL perdidos:     ${drain.lost.toFixed(6)} SOL (${pct}% del saldo)\n`;
+        report += `  Saldo previo:     ${drain.balance_before.toFixed(6)} SOL\n`;
+        report += `  Saldo posterior:  ${drain.balance_after.toFixed(6)} SOL\n`;
+        if (drain.sig) report += `  Firma:            ${drain.sig}\n`;
+        report += `  Solscan:          https://solscan.io/tx/${drain.sig || vuln?.sig || ''}\n`;
+    } else {
+        report += '  (No se detectó una transacción de drenaje)\n';
+    }
+    report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  6. FLUJO DE FONDOS — WALLETS IDENTIFICADAS\n';
+    report += '─' .repeat(70) + '\n';
+    report += `  Total wallets:     ${allNodes.length}\n`;
+    report += `  Total transfers:   ${allTransfers.length}\n`;
+    report += `  SOL total perdido: ~${totalSolLost.toFixed(6)} SOL\n\n`;
+
+    for (const g of ['target', 'intermediary', 'origin']) {
+        if (knownByGroup[g] && knownByGroup[g].length > 0) {
+            report += `  ${groupNames[g] || g}:\n`;
+            for (const w of knownByGroup[g]) {
+                report += `    • ${w.label}: ${w.addr}\n`;
+                report += `      https://solscan.io/account/${w.addr}\n`;
+            }
+            report += '\n';
+        }
+    }
+
+    // Add unknown wallets
+    const knownAddrs = new Set(Object.keys(KNOWN));
+    const unknownAddrs = allNodes.filter(n => !knownAddrs.has(n)).slice(0, 10);
+    if (unknownAddrs.length > 0) {
+        report += `  ❓ NO IDENTIFICADAS (${unknownAddrs.length} mostradas):\n`;
+        for (const a of unknownAddrs) {
+            report += `    • ${a}\n      https://solscan.io/account/${a}\n`;
+        }
         report += '\n';
     }
-    report += `--- Flujo de fondos ---\n`;
-    report += `Total wallets identificadas: ${allNodes.length}\n`;
-    report += `Total transferencias: ${allTransfers.length}\n`;
-    report += `Wallets conocidas:\n${knownWallets || '  (ninguna)'}\n\n`;
-    report += `--- Enlaces para reportar ---\n`;
-    report += `• Google Safe Browsing: https://safebrowsing.google.com/safebrowsing/report_phish/\n`;
-    report += `• IC3 (FBI): https://www.ic3.gov/\n`;
-    report += `• Solana validator alert: reportar en https://discord.gg/solana\n`;
+
+    report += '─' .repeat(70) + '\n';
+    report += '  7. MOVIMIENTOS PRINCIPALES\n';
+    report += '─' .repeat(70) + '\n';
+    const topTransfers = allTransfers.slice(0, 15);
+    for (const t of topTransfers) {
+        const fromLabel = KNOWN[t.from] ? KNOWN[t.from].label : t.from.slice(0, 8)+'..'+t.from.slice(-4);
+        const toLabel = KNOWN[t.to] ? KNOWN[t.to].label : t.to.slice(0, 8)+'..'+t.to.slice(-4);
+        const amt = typeof t.amount === 'number' ? t.amount.toFixed(t.unit === 'SOL' ? 6 : 2) : t.amount;
+        report += `  ${t.time || ''}  ${fromLabel} → ${toLabel}  ${amt} ${t.unit}\n`;
+    }
+    if (allTransfers.length > 15) report += `  ... y ${allTransfers.length - 15} transferencias más\n`;
+    report += '\n';
+
+    report += '─' .repeat(70) + '\n';
+    report += '  8. ENLACES PARA REPORTAR\n';
+    report += '─' .repeat(70) + '\n';
+    report += `  🛡️  Google Safe Browsing (phishing):\n     https://safebrowsing.google.com/safebrowsing/report_phish/\n`;
+    report += `  🏛️  IC3 — FBI (ciberdelito):\n     https://www.ic3.gov/\n`;
+    report += `  💬  Solana Discord (reportar validador/programa):\n     https://discord.gg/solana\n`;
+    report += `  🔍  BetterHelp / HelpMePhish (community):\n     https://www.helphemephish.com/\n`;
+    if (phishingUrl) {
+        report += `  🌐  Reportar sitio de phishing:\n     https://developers.google.com/safe-browsing/v4/submit-url\n`;
+    }
+    if (collectorAddr) {
+        report += `  📊  Trackear wallet del atacante:\n     https://solana-wallet-tracer.onrender.com/?address=${collectorAddr}\n`;
+    }
+    report += '\n';
+    report += '─' .repeat(70) + '\n';
+    report += '  FIN DEL REPORTE\n';
+    report += '─' .repeat(70) + '\n';
+    report += '  Generado por Solana Wallet Tracer — github.com/JOSEonSOLANA/solana-wallet-tracer\n';
 
     const safeReport = report.replace(/`/g, "'").replace(/\\/g, "\\\\").replace(/\$/g, "\\$");
-    out.innerHTML = `<textarea readonly style="width:100%;height:180px;background:#0d0d22;border:1px solid #2a2a4e;color:#ccc;padding:8px;border-radius:5px;font-size:9px;font-family:monospace;resize:vertical;">${report}</textarea>
-        <button onclick="var t=this.parentElement.querySelector('textarea');navigator.clipboard.writeText(t.value).then(function(){t.textContent='✓ Copiado'});" style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.25);color:#4ade80;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px;margin-top:4px;">📋 Copiar reporte</button>`;
+    out.innerHTML = `<textarea readonly style="width:100%;height:200px;background:#0d0d22;border:1px solid #2a2a4e;color:#ccc;padding:8px;border-radius:5px;font-size:9px;font-family:monospace;resize:vertical;line-height:1.3;">${report}</textarea>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+            <button onclick="var t=this.parentElement.parentElement.querySelector('textarea');navigator.clipboard.writeText(t.value).then(function(){this.textContent='✓ Copiado'}.bind(this));" style="flex:1;background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.25);color:#4ade80;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px;">📋 Copiar</button>
+            <button onclick="window.open('https://safebrowsing.google.com/safebrowsing/report_phish/','_blank')" style="flex:1;background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.25);color:#60a5fa;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px;">🛡️ Reportar phishing</button>
+            <button onclick="window.open('https://www.ic3.gov/','_blank')" style="flex:1;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.25);color:#ff6b6b;padding:4px 10px;border-radius:5px;cursor:pointer;font-size:9px;">🏛️ IC3 (FBI)</button>
+        </div>`;
     out.style.display = 'block';
 }
 
